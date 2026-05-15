@@ -27,7 +27,7 @@ Telegram does. Forum topics in a supergroup are already how I separate concerns:
 
 icarus is that. Each Telegram topic becomes a folder on disk. The bot spawns the real `claude` CLI with `cwd` set to that folder, so the agent inherits Claude Code's full toolset (Bash, file edits, MCP servers, skills) and your existing CLI auth — there's no new agent loop to debug. Topics can't see each other; conversational memory is per-topic too. Notes you take in the "Acme Corp" topic stay in the Acme Corp wiki.
 
-It's small enough that you can read the whole thing in an afternoon.
+The whole thing is about 1,300 lines of TypeScript. Read it in an afternoon, fork it, change anything.
 
 ## Quick start
 
@@ -61,16 +61,16 @@ systemctl --user enable --now icarus
 journalctl --user -u icarus -f
 ```
 
-The repo also ships `systemd/icarus-prune.timer` — a weekly job that walks every topic's `wiki/` and applies the `prune-wiki` skill (see `data/skills/prune-wiki.md`).
+There's also a weekly prune timer (`systemd/icarus-prune.timer`) that walks every topic's `wiki/` through the `prune-wiki` skill — see `data/skills/prune-wiki.md`.
 </details>
 
 ## Philosophy
 
-**One topic, one folder, one wiki.** No global wiki, no cross-topic search, no clever routing. Each Telegram forum topic gets `data/threads/<id>/` and the agent's cwd is that folder. Isolation is the feature: notes from your client work don't leak into your weekend project.
+**One topic, one folder, one wiki.** Each Telegram forum topic gets `data/threads/<id>/` and the agent's cwd is that folder. There's no global wiki and no cross-topic search, so notes from your client work don't end up in your weekend project.
 
 **Use the real `claude` CLI.** icarus doesn't reimplement an agent loop. It spawns `claude --resume <session>` per turn with the topic's folder as cwd. You inherit Claude Code's full toolset, every model release, your existing auth, and any MCP servers or skills you already have configured.
 
-**Memory lives on disk, not in a vector DB.** Each topic is a small markdown garden: an `index.md` catalog, a `log.md` activity tail, and a `wiki/` of short pages. The agent reads `index.md` and the tail of `log.md` at the top of every turn, then decides what to grep. No embeddings, no retrieval magic — just files you can `cat`.
+**Memory lives on disk, not in a vector DB.** Each topic is a folder of short markdown pages: `index.md` is a one-line catalog, `log.md` is a tail of recent activity, and `wiki/` holds the actual notes. The agent reads `index.md` and the tail of `log.md` at the top of every turn, then greps for whatever it needs. You can `cat` your own memory.
 
 **Skills are markdown.** A skill is a single file at `data/skills/<name>.md`. The H1 becomes its title and shows up in every prompt's `<skills>` block; the rest is the recipe. You can add, edit, and delete skills by talking to the bot.
 
@@ -195,7 +195,7 @@ They're recorded in `state/messages.db` for audit, but the agent isn't invoked. 
 
 **Why one folder per topic instead of one big wiki?**
 
-Because compounding works better with strong walls. A single global wiki ends up with cross-domain contradictions and ranking noise; one folder per topic keeps each garden small enough to fit in the agent's context every turn.
+A single global wiki collects cross-domain contradictions and gets too big to fit in context. One folder per topic keeps each one small enough that the agent can load its `index.md` every turn and grep from there.
 
 **How big can a topic's wiki get before it stops fitting?**
 
