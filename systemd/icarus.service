@@ -1,0 +1,19 @@
+[Unit]
+Description=Icarus (Telegram + Karpathy wiki agent)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jeon/Projects/icarus
+EnvironmentFile=/home/jeon/Projects/icarus/.env
+Environment=PATH=/home/jeon/.nvm/versions/node/v22.22.2/bin:/home/jeon/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=CLAUDE_BIN=/home/jeon/.local/bin/claude
+ExecStart=/home/jeon/.nvm/versions/node/v22.22.2/bin/node /home/jeon/Projects/icarus/dist/index.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/jeon/Projects/icarus/logs/stdout.log
+StandardError=append:/home/jeon/Projects/icarus/logs/stderr.log
+
+[Install]
+WantedBy=default.target

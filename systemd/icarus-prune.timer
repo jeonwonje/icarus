@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger weekly wiki prune for Icarus
+
+[Timer]
+# Sunday 03:00 in the system's local timezone. Persistent=true catches up
+# the run if the machine was off when the timer would have fired.
+OnCalendar=Sun 03:00
+Persistent=true
+Unit=icarus-prune.service
+
+[Install]
+WantedBy=timers.target

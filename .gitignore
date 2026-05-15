@@ -1,0 +1,21 @@
+node_modules/
+dist/
+
+# Per-instance state (sqlite db, runtime artifacts)
+state/
+logs/
+
+# Per-thread folders are scaffolded at runtime; only the shared persona and skills are tracked.
+data/threads/
+
+.env
+
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+.DS_Store
+.idea/
+.vscode/
+.tmp-*
