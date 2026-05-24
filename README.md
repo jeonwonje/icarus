@@ -1,7 +1,7 @@
 <h1 align="center">icarus</h1>
 
 <p align="center">
-  A Telegram-driven wiki agent. Every forum topic in your group becomes its own compounding knowledge base — like a Claude.ai Project, but driven from inside the chat you're already in.
+  A personal life agent driven from Telegram DMs. One operator, one shared wiki, one Claude session — like a Claude.ai Project that lives in the chat you're already in.
 </p>
 
 <p align="center">
@@ -23,32 +23,28 @@
 
 Claude.ai Projects are the right shape for long-running knowledge work — pin some files, chat about them, watch context compound. But they live behind a browser tab, and most of my actual conversations don't.
 
-Telegram does. Forum topics in a supergroup are already how I separate concerns: one topic per project, one per client, one per running joke. What was missing was a Project sitting *behind* each topic, so the things I figure out in chat stop evaporating.
+Telegram does. I wanted a single agent that knew everything I'd told it — projects, people, decisions, plans — and was always one DM away. icarus is that. The bot spawns the local `claude` CLI per turn with `cwd` set to a folder of markdown. You inherit Claude Code's full toolset (Bash, file edits, MCP servers, skills) and your existing CLI auth.
 
-icarus is that. Each Telegram topic becomes a folder on disk. The bot spawns the real `claude` CLI with `cwd` set to that folder, so the agent inherits Claude Code's full toolset (Bash, file edits, MCP servers, skills) and your existing CLI auth — there's no new agent loop to debug. Topics can't see each other; conversational memory is per-topic too. Notes you take in the "Acme Corp" topic stay in the Acme Corp wiki.
-
-The whole thing is about 1,300 lines of TypeScript. Read it in an afternoon, fork it, change anything.
+The whole thing is around 1,000 lines of TypeScript. Read it in an afternoon, fork it, change anything.
 
 ## Quick start
 
-**You'll need:** Node 20+, the [`claude` CLI](https://claude.com/claude-code) installed and logged in, and a Telegram supergroup with **Topics** enabled where you can promote a bot to admin.
+**You'll need:** Node 20+, the [`claude` CLI](https://claude.com/claude-code) installed and logged in, and a Telegram account.
 
 ```bash
 git clone https://github.com/jeonwonje/icarus.git
 cd icarus
 npm install
 cp .env.example .env       # fill in TELEGRAM_BOT_TOKEN
-npm run dev                # tsx hot reload — or: npm run build && npm run start
+npm run dev
 ```
 
 Then in Telegram:
 
 1. Message [@BotFather](https://t.me/BotFather), `/newbot`, paste the token into `.env`.
-2. Create a supergroup → Settings → enable **Topics** → add your bot → promote it to admin.
-3. In any topic, send `/chatid`. Paste the printed `chat_id` into `.env`, restart.
-4. Post a message in any topic. The bot scaffolds the topic's folder on first message.
-
-Only Telegram chat admins can talk to the agent. Non-admin messages are recorded for audit but the agent isn't invoked.
+2. DM your new bot. It will reply with your `user_id` and instructions.
+3. Paste that id into `OPERATOR_USER_ID` in `.env`, restart.
+4. DM the bot. Anyone else who finds the bot is silently ignored.
 
 <details>
 <summary><strong>Run as a user service (systemd)</strong></summary>
@@ -61,33 +57,32 @@ systemctl --user enable --now icarus
 journalctl --user -u icarus -f
 ```
 
-There's also a weekly prune timer (`systemd/icarus-prune.timer`) that walks every topic's `wiki/` through the `prune-wiki` skill — see `data/skills/prune-wiki.md`.
+There's also a weekly prune timer (`systemd/icarus-prune.timer`) that runs the `prune-wiki` skill over `data/wiki/` — see `data/skills/prune-wiki.md`.
 </details>
 
 ## Philosophy
 
-**One topic, one folder, one wiki.** Each Telegram forum topic gets `data/threads/<id>/` and the agent's cwd is that folder. There's no global wiki and no cross-topic search, so notes from your client work don't end up in your weekend project.
+**One operator, one wiki, one session.** Everything you tell the agent lives in `data/`. There's no per-topic or per-conversation split — the point is a single agent that remembers everything.
 
-**Use the real `claude` CLI.** icarus doesn't reimplement an agent loop. It spawns `claude --resume <session>` per turn with the topic's folder as cwd. You inherit Claude Code's full toolset, every model release, your existing auth, and any MCP servers or skills you already have configured.
+**Use the real `claude` CLI.** icarus doesn't reimplement an agent loop. It spawns `claude --resume <session>` per turn with `cwd=data/`. You inherit Claude Code's full toolset, every model release, your existing auth, and any MCP servers or skills you already have configured.
 
-**Memory lives on disk, not in a vector DB.** Each topic is a folder of short markdown pages: `index.md` is a one-line catalog, `log.md` is a tail of recent activity, and `wiki/` holds the actual notes. The agent reads `index.md` and the tail of `log.md` at the top of every turn, then greps for whatever it needs. You can `cat` your own memory.
+**Memory lives on disk, not in a vector DB.** A folder of short markdown pages: `index.md` is a one-line catalog, `log.md` is a tail of recent activity, and `wiki/` holds the notes. The agent reads `index.md` and the log tail at the top of every turn, then greps for whatever it needs. You can `cat` your own memory.
 
 **Skills are markdown.** A skill is a single file at `data/skills/<name>.md`. The H1 becomes its title and shows up in every prompt's `<skills>` block; the rest is the recipe. You can add, edit, and delete skills by talking to the bot.
 
-**Boring infrastructure.** SQLite for messages and session IDs. A per-thread async mutex. grammY for the Telegram side. No queues, no Redis, no orchestrator.
+**Boring infrastructure.** SQLite for messages and the session id. A single async mutex. grammY for the Telegram side. No queues, no Redis, no orchestrator.
 
 ## What it supports
 
-- **Per-topic isolation** — each Telegram forum topic has its own folder, its own `claude` session, and its own optional `CLAUDE.md` addendum on top of the shared persona.
-- **Outbox file delivery** — drop a file into the topic's `outbox/` during a turn and it's sent back to the chat at end-of-turn, then deleted.
-- **Admin gating** — only Telegram chat admins can invoke the agent. Non-admin messages are stored for audit.
-- **Slash command pass-through** — `/chatid`, `/ping`, `/help` are handled by the bot. Anything else (`/compact`, `/model`, `/clear`, `/init`, …) is forwarded verbatim to the `claude` subprocess.
-- **Weekly prune** — a systemd timer that visits every topic and runs the `prune-wiki` skill to compact stale notes.
+- **Single-operator DM gate** — only the user id in `OPERATOR_USER_ID` can talk to the bot.
+- **Outbox file delivery** — drop a file into `data/outbox/` during a turn and it's sent back to the chat at end-of-turn, then deleted.
+- **Slash command pass-through** — `/whoami`, `/ping`, `/help` are handled by the bot. Anything else (`/compact`, `/model`, `/clear`, `/init`, …) is forwarded verbatim to the `claude` subprocess.
+- **Weekly prune** — a systemd timer that runs the `prune-wiki` skill to compact stale notes.
 - **Audit trail** — every inbound and outbound message is persisted in `state/messages.db`.
 
 ## Usage
 
-Once you're set up, just talk to the bot in any forum topic:
+Once you're set up, DM the bot:
 
 ```
 The new EV charger spec landed — 11 kW, three-phase, OCPP 1.6.
@@ -99,70 +94,64 @@ Compile a one-page summary of everything we know about Customer X
 and put it in the outbox.
 ```
 
-The agent will write or update pages under `wiki/`, refresh `index.md`, append a line to `log.md`, and (if you asked) drop a file in `outbox/` for delivery. Each topic does this independently.
+The agent will write or update pages under `wiki/`, refresh `index.md`, append a line to `log.md`, and (if you asked) drop a file in `outbox/` for delivery.
 
 ## Customizing
 
-Three layers, from broadest to narrowest:
+Two layers:
 
 | Layer | File | Scope |
 |-------|------|-------|
-| Persona | `data/CLAUDE.md` | Loaded for every topic. Edit to change the bot's voice, company context, or default behavior. |
-| Skills | `data/skills/<name>.md` | Recipes available globally. Listed in every prompt's `<skills>` block. |
-| Topic-local | `data/threads/<id>/CLAUDE.md` *(optional)* | Per-topic addendum on top of the shared persona. |
+| Persona | `data/CLAUDE.md` | Loaded on every turn. Edit to change voice, profile, defaults. |
+| Skills | `data/skills/<name>.md` | Recipes listed in every prompt's `<skills>` block. |
 
 You can manage skills in chat ("add a skill called X to do Y", "remove the X skill") — they're plain file ops.
 
 ## Architecture
 
 ```
-Telegram topic ──► grammY router ──► per-thread mutex
-                                          │
-                                          ▼
-                          spawn `claude --resume <sid>`
-                          cwd = data/threads/<topic>/
-                                          │
-                                          ▼
-                  agent reads/writes inside its own folder
-                                          │
-                                          ▼
-              outbox/ delivered back to topic, then cleared
+Telegram DM ──► grammY router ──► single 'life' mutex
+                                       │
+                                       ▼
+                       spawn `claude --resume <sid>`
+                                cwd = data/
+                                       │
+                                       ▼
+                  agent reads/writes inside data/
+                                       │
+                                       ▼
+             outbox/ delivered back to DM, then cleared
 ```
 
-One claude session per Telegram thread, keyed `tg:<chatId>:<threadId>`. A per-thread mutex serializes turns within a topic; topics run independently. Messages and session IDs persist in `state/messages.db` (SQLite, separate from the wiki).
+One Claude session, keyed `'life'`. A single mutex serializes turns. Messages and the session id persist in `state/messages.db` (SQLite, separate from the wiki).
 
 **Key files:**
 
 - `src/index.ts` — orchestrator wiring bot ↔ agent
-- `src/telegram.ts` — grammY bot, message routing, admin gating
-- `src/agent-runner.ts` — spawns `claude`, streams events, manages cwd
-- `src/admin-commands.ts` — `/chatid`, `/ping`, `/help`
+- `src/telegram.ts` — grammY bot, DM-only, operator gating
+- `src/agent-runner.ts` — spawns `claude`, streams events
+- `src/admin-commands.ts` — `/whoami`, `/ping`, `/help`
 - `src/db.ts` — SQLite (messages, sessions)
-- `src/mutex.ts` — per-thread async lock
-- `src/memory/scaffold.ts` — top-level `data/` skeleton
-- `src/memory/threads.ts` — per-thread paths and folder creation
+- `src/mutex.ts` — tiny async lock
+- `src/memory/scaffold.ts` — `data/` skeleton
 - `src/memory/bootstrap.ts` — assembles the `<wiki_index>` / `<recent_activity>` / `<skills>` prompt prefix
-- `src/memory/log.ts` — per-thread activity log
-- `src/memory/outbox.ts` — per-thread file delivery
-- `scripts/weekly-prune.ts` — cross-topic prune CLI
+- `src/memory/log.ts` — activity log
+- `src/memory/outbox.ts` — file delivery
+- `scripts/weekly-prune.ts` — prune CLI
 
 **On disk:**
 
 ```
 data/
-  CLAUDE.md                   ← shared persona (tracked)
-  skills/<name>.md            ← global skill recipes (tracked, optional)
-  threads/<thread_id>/        ← one folder per Telegram topic (gitignored)
-    CLAUDE.md (optional)      ← topic-specific addendum
-    index.md                  ← catalog of pages in wiki/
-    log.md                    ← append-only activity log
-    wiki/                     ← markdown notes for this topic
-    outbox/                   ← files queued for delivery
+  CLAUDE.md                 ← persona (tracked)
+  skills/<name>.md          ← global skill recipes (tracked)
+  index.md                  ← catalog of pages in wiki/ (gitignored)
+  log.md                    ← append-only activity log (gitignored)
+  wiki/                     ← markdown notes (gitignored)
+  outbox/                   ← files queued for delivery (gitignored)
 state/
-  messages.db                 ← SQLite: messages + session IDs
+  messages.db               ← SQLite: messages + session id
 ```
-
-`data/CLAUDE.md` and `data/skills/*.md` are tracked. Everything under `data/threads/` is gitignored — it's per-deployment user content.
 
 ## Tests
 
@@ -179,31 +168,19 @@ No. icarus shells out to the `claude` CLI you've already installed and logged in
 
 **Why Telegram?**
 
-Telegram's forum topics give you free per-conversation isolation with no UI to build. The bot API is mature, grammY is excellent, and the data model (chat → topic → message) maps cleanly to (deployment → wiki → turn).
+The bot API is mature, grammY is excellent, and a DM is the lowest-friction way to talk to an agent from a phone, a desktop, and a watch — without building a UI.
 
-**Can I run this for multiple groups?**
+**Can I run this for multiple users?**
 
-Not in one process — `TELEGRAM_CHAT_ID` is single-valued. Run multiple instances with separate `data/` and `state/` directories if you need to.
+Not in one process — `OPERATOR_USER_ID` is single-valued. Run multiple instances with separate `data/` and `state/` directories if you need to.
 
 **How is this different from the official Claude.ai Telegram integrations?**
 
 It isn't an integration — it's a self-hosted bot wrapping the local `claude` CLI. You own the data on disk, the agent runs with whatever tools and MCP servers your CLI has configured, and there's no third-party service in the loop besides Telegram itself.
 
-**What happens to non-admin messages?**
+**How big can the wiki get before it stops fitting?**
 
-They're recorded in `state/messages.db` for audit, but the agent isn't invoked. Only Telegram chat admins can drive the bot.
-
-**Why one folder per topic instead of one big wiki?**
-
-A single global wiki collects cross-domain contradictions and gets too big to fit in context. One folder per topic keeps each one small enough that the agent can load its `index.md` every turn and grep from there.
-
-**How big can a topic's wiki get before it stops fitting?**
-
-Only `index.md` and the tail of `log.md` are loaded every turn — actual pages are read on demand. The weekly `prune-wiki` skill exists to keep `index.md` and individual pages tight. In practice, a topic with hundreds of pages still works as long as `index.md` stays small.
-
-**Can the agent reach into other topics?**
-
-Not by default — its cwd is the topic's folder, so relative paths stay scoped. Symlinks, absolute paths, and explicit user requests can break that, but the agent's persona discourages it.
+Only `index.md` and the tail of `log.md` are loaded every turn — actual pages are read on demand. The weekly `prune-wiki` skill exists to keep `index.md` and individual pages tight. In practice, hundreds of pages still work as long as `index.md` stays small.
 
 ## Contributing
 

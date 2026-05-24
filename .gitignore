@@ -5,8 +5,11 @@ dist/
 state/
 logs/
 
-# Per-thread folders are scaffolded at runtime; only the shared persona and skills are tracked.
-data/threads/
+# Mutable wiki/log/outbox content — only the persona and skills are tracked.
+data/wiki/
+data/outbox/
+data/index.md
+data/log.md
 
 .env
 
