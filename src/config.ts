@@ -2,14 +2,14 @@ import path from 'path';
 
 import { readEnvFile } from './env.js';
 
-const envConfig = readEnvFile(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']);
+const envConfig = readEnvFile(['TELEGRAM_BOT_TOKEN', 'OPERATOR_USER_ID']);
 
 function fromEnv(key: string): string | undefined {
   return process.env[key] || envConfig[key];
 }
 
 export const TELEGRAM_BOT_TOKEN = fromEnv('TELEGRAM_BOT_TOKEN') || '';
-export const TELEGRAM_CHAT_ID = fromEnv('TELEGRAM_CHAT_ID') || '';
+export const OPERATOR_USER_ID = fromEnv('OPERATOR_USER_ID') || '';
 
 const PROJECT_ROOT = process.cwd();
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
