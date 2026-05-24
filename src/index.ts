@@ -1,4 +1,5 @@
 import { setDefaultResultOrder } from 'node:dns';
+import { randomUUID } from 'node:crypto';
 
 import { Bot } from 'grammy';
 
@@ -152,7 +153,7 @@ async function main(): Promise<void> {
       const text = (method === 'sendMessage' ? (p.text as string) : (p.caption as string)) ?? '';
       if (text) {
         insertMessage({
-          telegramMsgId: `bot_${Date.now()}`,
+          telegramMsgId: `bot_${randomUUID()}`,
           senderId: 'bot',
           senderName: 'bot',
           content: text,
