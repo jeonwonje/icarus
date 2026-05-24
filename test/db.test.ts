@@ -18,39 +18,44 @@ describe('db', () => {
     closeDb();
   });
 
-  it('insertMessage is idempotent on (telegram_msg_id, chat_jid)', () => {
+  it('insertMessage is idempotent on telegram_msg_id', () => {
     const row = {
       telegramMsgId: '1',
-      chatJid: 'tg:-100:5',
-      threadId: 5,
       senderId: 'u1',
       senderName: 'Alice',
       content: 'hi',
-      timestamp: '2026-04-21T10:00:00Z',
+      timestamp: '2026-05-25T10:00:00Z',
     };
     insertMessage(row);
-    insertMessage(row); // duplicate — INSERT OR IGNORE
+    insertMessage(row);
     const count = getDb()
-      .prepare('SELECT COUNT(*) AS n FROM messages WHERE chat_jid = ?')
-      .get(row.chatJid) as { n: number };
+      .prepare('SELECT COUNT(*) AS n FROM messages')
+      .get() as { n: number };
     expect(count.n).toBe(1);
   });
 
-  it('sessions upsert and clear, keyed by thread JID', () => {
-    const jid = 'tg:-100:42';
-    expect(getSession(jid)).toBeNull();
-    setSession(jid, 'sess-abc');
-    expect(getSession(jid)).toBe('sess-abc');
-    setSession(jid, 'sess-def');
-    expect(getSession(jid)).toBe('sess-def');
-    clearSession(jid);
-    expect(getSession(jid)).toBeNull();
+  it('insertMessage stores bot flag', () => {
+    insertMessage({
+      telegramMsgId: 'bot_1',
+      senderId: 'bot',
+      senderName: 'bot',
+      content: 'reply',
+      timestamp: '2026-05-25T10:00:00Z',
+      isBot: true,
+    });
+    const row = getDb()
+      .prepare('SELECT is_bot FROM messages WHERE telegram_msg_id = ?')
+      .get('bot_1') as { is_bot: number };
+    expect(row.is_bot).toBe(1);
   });
 
-  it('sessions for different threads are isolated', () => {
-    setSession('tg:-100:1', 'sess-one');
-    setSession('tg:-100:2', 'sess-two');
-    expect(getSession('tg:-100:1')).toBe('sess-one');
-    expect(getSession('tg:-100:2')).toBe('sess-two');
+  it('sessions upsert and clear (single life session)', () => {
+    expect(getSession()).toBeNull();
+    setSession('sess-abc');
+    expect(getSession()).toBe('sess-abc');
+    setSession('sess-def');
+    expect(getSession()).toBe('sess-def');
+    clearSession();
+    expect(getSession()).toBeNull();
   });
 });

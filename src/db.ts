@@ -5,22 +5,10 @@ import path from 'path';
 import { DB_PATH } from './config.js';
 import { logger } from './logger.js';
 
-export interface StoredMessage {
-  id: number;
-  telegramMsgId: string;
-  chatJid: string;
-  threadId: number | null;
-  senderId: string;
-  senderName: string | null;
-  content: string;
-  timestamp: string;
-  isBot: boolean;
-}
+const SESSION_KEY = 'life';
 
 export interface NewMessage {
   telegramMsgId: string;
-  chatJid: string;
-  threadId: number | null;
   senderId: string;
   senderName: string | null;
   content: string;
@@ -34,31 +22,23 @@ function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS messages (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      telegram_msg_id TEXT NOT NULL,
-      chat_jid        TEXT NOT NULL,
-      thread_id       INTEGER,
+      telegram_msg_id TEXT NOT NULL UNIQUE,
       sender_id       TEXT NOT NULL,
       sender_name     TEXT,
       content         TEXT NOT NULL,
       timestamp       TEXT NOT NULL,
-      is_bot          INTEGER DEFAULT 0,
-      UNIQUE (telegram_msg_id, chat_jid)
+      is_bot          INTEGER DEFAULT 0
     );
-    CREATE INDEX IF NOT EXISTS idx_messages_chat_ts
-      ON messages(chat_jid, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(timestamp);
 
     CREATE TABLE IF NOT EXISTS sessions (
-      thread_jid TEXT PRIMARY KEY,
+      key        TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
   `);
 }
 
-/**
- * Open (or create) the SQLite database. Pass a custom path for tests —
- * use `:memory:` to avoid touching the filesystem.
- */
 export function openDb(dbPath: string = DB_PATH): Database.Database {
   if (dbPath !== ':memory:') {
     const dir = path.dirname(dbPath);
@@ -84,19 +64,15 @@ export function closeDb(): void {
   }
 }
 
-// --- messages -----------------------------------------------------------
-
 export function insertMessage(m: NewMessage): number {
   const row = getDb()
     .prepare(
       `INSERT OR IGNORE INTO messages
-       (telegram_msg_id, chat_jid, thread_id, sender_id, sender_name, content, timestamp, is_bot)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (telegram_msg_id, sender_id, sender_name, content, timestamp, is_bot)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.telegramMsgId,
-      m.chatJid,
-      m.threadId,
       m.senderId,
       m.senderName,
       m.content,
@@ -106,31 +82,26 @@ export function insertMessage(m: NewMessage): number {
   return Number(row.lastInsertRowid);
 }
 
-// --- sessions -----------------------------------------------------------
-//
-// One claude session per Telegram thread. Keyed by the thread JID
-// (`tg:<chat_id>:<thread_id>`) so chat moves don't collide.
-
-export function getSession(threadJid: string): string | null {
+export function getSession(): string | null {
   const row = getDb()
-    .prepare('SELECT session_id FROM sessions WHERE thread_jid = ?')
-    .get(threadJid) as { session_id: string } | undefined;
+    .prepare('SELECT session_id FROM sessions WHERE key = ?')
+    .get(SESSION_KEY) as { session_id: string } | undefined;
   return row?.session_id ?? null;
 }
 
-export function setSession(threadJid: string, sessionId: string): void {
+export function setSession(sessionId: string): void {
   const now = new Date().toISOString();
   getDb()
     .prepare(
-      `INSERT INTO sessions (thread_jid, session_id, updated_at)
+      `INSERT INTO sessions (key, session_id, updated_at)
        VALUES (?, ?, ?)
-       ON CONFLICT(thread_jid) DO UPDATE SET
+       ON CONFLICT(key) DO UPDATE SET
          session_id = excluded.session_id,
          updated_at = excluded.updated_at`,
     )
-    .run(threadJid, sessionId, now);
+    .run(SESSION_KEY, sessionId, now);
 }
 
-export function clearSession(threadJid: string): void {
-  getDb().prepare('DELETE FROM sessions WHERE thread_jid = ?').run(threadJid);
+export function clearSession(): void {
+  getDb().prepare('DELETE FROM sessions WHERE key = ?').run(SESSION_KEY);
 }
