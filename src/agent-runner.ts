@@ -13,34 +13,30 @@ const STALE_SESSION_RE = /No conversation found with session ID/i;
 /**
  * Spawn `claude` as a subprocess and stream output events back to the caller.
  *
- * The caller controls `cwd` (typically the per-thread folder) and is
- * responsible for prepending any context prefix to `prompt`. Slash commands
- * should be sent unmodified.
- *
- * Session resumption is handled via `--resume <sessionId>`; callers should
- * persist the new session ID from the `system/init` event.
+ * The caller controls `cwd` (defaults to data/) and is responsible for
+ * prepending any context prefix to `prompt`. Slash commands should be
+ * sent unmodified. Session resumption is via `--resume <sessionId>`;
+ * callers persist the new session ID emitted via `system/init`.
  */
 export async function runAgent(
-  threadJid: string,
   input: AgentInput,
   onEvent: AgentEventHandler,
 ): Promise<AgentOutput> {
-  const result = await runAgentInner(threadJid, input, onEvent);
+  const result = await runAgentInner(input, onEvent);
   if (
     result.status === 'error' &&
     input.sessionId &&
     result.error &&
     STALE_SESSION_RE.test(result.error)
   ) {
-    logger.warn({ threadJid, sessionId: input.sessionId }, 'session stale — clearing and retrying fresh');
-    clearSession(threadJid);
-    return runAgentInner(threadJid, { ...input, sessionId: undefined }, onEvent);
+    logger.warn({ sessionId: input.sessionId }, 'session stale — clearing and retrying fresh');
+    clearSession();
+    return runAgentInner({ ...input, sessionId: undefined }, onEvent);
   }
   return result;
 }
 
 async function runAgentInner(
-  threadJid: string,
   input: AgentInput,
   onEvent: AgentEventHandler,
 ): Promise<AgentOutput> {
@@ -61,7 +57,7 @@ async function runAgentInner(
 
   if (input.sessionId) args.push('--resume', input.sessionId);
 
-  logger.info({ threadJid, sessionId: input.sessionId, cwd }, 'Spawning agent');
+  logger.info({ sessionId: input.sessionId, cwd }, 'Spawning agent');
 
   return new Promise<AgentOutput>((resolve) => {
     const proc: ChildProcess = spawn(CLAUDE_BIN, args, {
@@ -78,11 +74,11 @@ async function runAgentInner(
     let eventChain: Promise<void> = Promise.resolve();
 
     let hardTimeout = setTimeout(() => {
-      logger.warn({ threadJid }, 'agent hard timeout');
+      logger.warn({}, 'agent hard timeout');
       proc.kill('SIGTERM');
     }, AGENT_TIMEOUT_MS);
     let idleTimeout = setTimeout(() => {
-      logger.warn({ threadJid }, 'agent idle timeout');
+      logger.warn({}, 'agent idle timeout');
       proc.kill('SIGTERM');
     }, AGENT_IDLE_TIMEOUT_MS);
     const resetIdle = () => {
@@ -96,7 +92,7 @@ async function runAgentInner(
         try {
           await onEvent(ev);
         } catch (err) {
-          logger.error({ threadJid, err }, 'agent onEvent handler threw');
+          logger.error({ err }, 'agent onEvent handler threw');
         }
       });
       hadOutput = true;
@@ -150,7 +146,7 @@ async function runAgentInner(
       const chunk = data.toString();
       stderrTail = (stderrTail + chunk).slice(-2000);
       for (const l of chunk.trim().split('\n')) {
-        if (l) logger.debug({ threadJid }, l);
+        if (l) logger.debug({}, l);
       }
     });
 
@@ -177,7 +173,7 @@ async function runAgentInner(
     proc.on('error', (err) => {
       clearTimeout(hardTimeout);
       clearTimeout(idleTimeout);
-      logger.error({ threadJid, err }, 'agent spawn error');
+      logger.error({ err }, 'agent spawn error');
       resolve({ status: 'error', result: null, error: `spawn error: ${err.message}` });
     });
   });
