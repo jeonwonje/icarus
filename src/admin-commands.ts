@@ -1,9 +1,9 @@
-import { TELEGRAM_CHAT_ID } from './config.js';
+import { OPERATOR_USER_ID } from './config.js';
 
 export interface AdminCtx {
-  threadId: number;
   command: string;
   args: string;
+  callerUserId: string;
 }
 
 export interface AdminResult {
@@ -15,17 +15,23 @@ export function handlePing(): AdminResult {
   return { handled: true, reply: 'pong' };
 }
 
-export function handleChatId(threadId: number): AdminResult {
+export function handleWhoami(callerUserId: string): AdminResult {
+  const isOperator = OPERATOR_USER_ID && callerUserId === OPERATOR_USER_ID;
+  const status = OPERATOR_USER_ID
+    ? isOperator
+      ? '(configured operator)'
+      : `(not the configured operator — operator is ${OPERATOR_USER_ID})`
+    : '(no operator configured — paste this into OPERATOR_USER_ID and restart)';
   return {
     handled: true,
-    reply: `chat_id: ${TELEGRAM_CHAT_ID}\nthread_id: ${threadId}\nJID: tg:${TELEGRAM_CHAT_ID}:${threadId}`,
+    reply: `your_user_id: ${callerUserId} ${status}`,
   };
 }
 
 export function handleHelp(): AdminResult {
   const lines = [
-    '*Admin commands*',
-    '/chatid — show chat + thread IDs',
+    '*Commands*',
+    '/whoami — show your user id and operator status',
     '/ping — health check',
     '',
     'Any other /command (e.g. /compact, /model, /clear) is forwarded to the claude subprocess.',
@@ -34,12 +40,11 @@ export function handleHelp(): AdminResult {
 }
 
 export async function handleAdminCommand(ctx: AdminCtx): Promise<AdminResult> {
-  const { threadId, command } = ctx;
-  switch (command) {
+  switch (ctx.command) {
     case 'ping':
       return handlePing();
-    case 'chatid':
-      return handleChatId(threadId);
+    case 'whoami':
+      return handleWhoami(ctx.callerUserId);
     case 'help':
       return handleHelp();
     default:
