@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { threadOutboxDir } from './threads.js';
+import { outboxDir } from './scaffold.js';
 
 export interface OutboxFile {
   absPath: string;
@@ -16,12 +16,8 @@ function classify(ext: string): 'image' | 'document' {
   return IMAGE_EXTS.has(ext.toLowerCase()) ? 'image' : 'document';
 }
 
-/**
- * List files queued in this thread's outbox, paired with any sibling
- * `.caption` file. Returns an empty list if the dir doesn't exist.
- */
-export function listOutbox(threadJid: string): OutboxFile[] {
-  const dir = threadOutboxDir(threadJid);
+export function listOutbox(): OutboxFile[] {
+  const dir = outboxDir();
   if (!fs.existsSync(dir)) return [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   const files: OutboxFile[] = [];
@@ -49,14 +45,14 @@ export function removeOutboxFile(file: OutboxFile): void {
   try {
     fs.unlinkSync(file.absPath);
   } catch {
-    // best-effort
+    /* best-effort */
   }
   const captionPath = file.absPath + '.caption';
   if (fs.existsSync(captionPath)) {
     try {
       fs.unlinkSync(captionPath);
     } catch {
-      // best-effort
+      /* best-effort */
     }
   }
 }

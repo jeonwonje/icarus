@@ -1,19 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 
-import { skillsDir } from './scaffold.js';
+import { indexFile, skillsDir } from './scaffold.js';
 import { readLogTail } from './log.js';
-import { threadIndexFile } from './threads.js';
 
 function readIfExists(file: string): string {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf-8').trim() : '';
 }
 
-/**
- * List skills as `skills/<name>.md — <h1 title>`. The h1 (or first non-blank
- * line) doubles as the description so the agent can decide whether to open
- * the file. Skills live as single .md files under data/skills/ (global).
- */
 function listSkills(): string {
   const dir = skillsDir();
   if (!fs.existsSync(dir)) return '';
@@ -29,7 +23,7 @@ function listSkills(): string {
       const first = content.split('\n').find((l) => l.trim().length > 0) ?? '';
       title = first.replace(/^#+\s*/, '').trim();
     } catch {
-      // Unreadable; fall through with empty title.
+      /* unreadable; fall through */
     }
     lines.push(title ? `skills/${name} — ${title}` : `skills/${name}`);
   }
@@ -37,12 +31,12 @@ function listSkills(): string {
 }
 
 /**
- * Build the prompt prefix for a per-thread turn: this thread's wiki index,
- * its recent activity log, and the global skills catalog.
+ * Build the prompt prefix: wiki index, recent log tail, and the global
+ * skills catalog. Used at the top of every agent turn.
  */
-export function buildBootstrapPrefix(threadJid: string): string {
-  const index = readIfExists(threadIndexFile(threadJid));
-  const logTail = readLogTail(threadJid, 20);
+export function buildBootstrapPrefix(): string {
+  const index = readIfExists(indexFile());
+  const logTail = readLogTail(20);
   const skills = listSkills();
 
   const parts: string[] = [];

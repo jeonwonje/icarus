@@ -17,58 +17,33 @@ afterEach(() => {
 });
 
 describe('ensureDataLayout', () => {
-  it('creates threads/ and skills/ on first run', async () => {
-    const { ensureDataLayout, dataDir, skillsDir, threadsRoot } = await import(
+  it('creates wiki/, outbox/, skills/ and seeds index.md + log.md on first run', async () => {
+    const { ensureDataLayout, dataDir, skillsDir } = await import(
       '../src/memory/scaffold.js'
     );
     const created = ensureDataLayout();
     expect(created).toBe(true);
-    expect(fs.statSync(threadsRoot()).isDirectory()).toBe(true);
+    expect(fs.statSync(path.join(dataDir(), 'wiki')).isDirectory()).toBe(true);
+    expect(fs.statSync(path.join(dataDir(), 'outbox')).isDirectory()).toBe(true);
     expect(fs.statSync(skillsDir()).isDirectory()).toBe(true);
-    // Sanity check: no embedded CLAUDE.md template — that ships in git.
+    expect(fs.readFileSync(path.join(dataDir(), 'index.md'), 'utf-8')).toContain('# Wiki index');
+    expect(fs.readFileSync(path.join(dataDir(), 'log.md'), 'utf-8')).toContain('# Activity log');
+    // CLAUDE.md ships in git, not generated.
     expect(fs.existsSync(path.join(dataDir(), 'CLAUDE.md'))).toBe(false);
   });
 
-  it('is idempotent', async () => {
-    const { ensureDataLayout } = await import('../src/memory/scaffold.js');
+  it('does not create the legacy threads/ folder', async () => {
+    const { ensureDataLayout, dataDir } = await import('../src/memory/scaffold.js');
     ensureDataLayout();
-    expect(ensureDataLayout()).toBe(false);
-  });
-});
-
-describe('ensureThreadLayout', () => {
-  it('creates wiki/, index.md, log.md under data/threads/<id>/', async () => {
-    const { ensureDataLayout } = await import('../src/memory/scaffold.js');
-    const { ensureThreadLayout, threadDir, threadWikiDir, threadIndexFile, threadLogFile } =
-      await import('../src/memory/threads.js');
-    ensureDataLayout();
-    const jid = 'tg:-100:53';
-    const created = ensureThreadLayout(jid);
-    expect(created).toBe(true);
-    expect(threadDir(jid)).toBe(path.join(tmpRoot, 'data', 'threads', '53'));
-    expect(fs.statSync(threadWikiDir(jid)).isDirectory()).toBe(true);
-    expect(fs.readFileSync(threadIndexFile(jid), 'utf-8')).toContain('# Wiki index');
-    expect(fs.readFileSync(threadLogFile(jid), 'utf-8')).toContain('thread folder created');
+    expect(fs.existsSync(path.join(dataDir(), 'threads'))).toBe(false);
   });
 
-  it('preserves existing files (idempotent)', async () => {
-    const { ensureDataLayout } = await import('../src/memory/scaffold.js');
-    const { ensureThreadLayout, threadIndexFile } = await import('../src/memory/threads.js');
+  it('preserves existing index.md and log.md (idempotent)', async () => {
+    const { ensureDataLayout, dataDir } = await import('../src/memory/scaffold.js');
     ensureDataLayout();
-    const jid = 'tg:-100:53';
-    ensureThreadLayout(jid);
-    fs.writeFileSync(threadIndexFile(jid), '# customised\n');
-    const created = ensureThreadLayout(jid);
+    fs.writeFileSync(path.join(dataDir(), 'index.md'), '# customised\n');
+    const created = ensureDataLayout();
     expect(created).toBe(false);
-    expect(fs.readFileSync(threadIndexFile(jid), 'utf-8')).toBe('# customised\n');
-  });
-
-  it('falls back to a sanitized name for synthetic CLI JIDs', async () => {
-    const { ensureDataLayout } = await import('../src/memory/scaffold.js');
-    const { threadDir } = await import('../src/memory/threads.js');
-    ensureDataLayout();
-    expect(threadDir('cli:weekly-prune')).toBe(
-      path.join(tmpRoot, 'data', 'threads', '_cli_weekly-prune'),
-    );
+    expect(fs.readFileSync(path.join(dataDir(), 'index.md'), 'utf-8')).toBe('# customised\n');
   });
 });
