@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/jeon/Projects/icarus
-EnvironmentFile=/home/jeon/Projects/icarus/.env
-Environment=PATH=/home/jeon/.nvm/versions/node/v22.22.2/bin:/home/jeon/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/jeon/icarus
+EnvironmentFile=/home/jeon/icarus/.env
+Environment=PATH=/home/jeon/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=CLAUDE_BIN=/home/jeon/.local/bin/claude
-ExecStart=/home/jeon/Projects/icarus/node_modules/.bin/tsx /home/jeon/Projects/icarus/scripts/weekly-prune.ts
-StandardOutput=append:/home/jeon/Projects/icarus/logs/prune.log
-StandardError=append:/home/jeon/Projects/icarus/logs/prune.log
+ExecStart=/usr/bin/node --dns-result-order=ipv4first /home/jeon/icarus/node_modules/.bin/tsx /home/jeon/icarus/scripts/weekly-prune.ts
+StandardOutput=append:/home/jeon/icarus/logs/prune.log
+StandardError=append:/home/jeon/icarus/logs/prune.log
