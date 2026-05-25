@@ -1,16 +1,16 @@
 {
   "name": "icarus",
   "version": "0.1.0",
-  "description": "Telegram-driven per-thread wiki agent. Each forum topic is its own compounding markdown knowledge base.",
+  "description": "Telegram-driven personal life agent. Single operator, one shared wiki, one Claude session.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "tsx --dns-result-order=ipv4first src/index.ts",
+    "start": "node --dns-result-order=ipv4first dist/index.js",
     "typecheck": "tsc --noEmit",
-    "prune:weekly": "tsx scripts/weekly-prune.ts",
+    "prune:weekly": "tsx --dns-result-order=ipv4first scripts/weekly-prune.ts",
     "test": "vitest run"
   },
   "dependencies": {
