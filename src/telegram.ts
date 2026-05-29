@@ -1,9 +1,19 @@
+import fs from 'fs';
+import https from 'https';
+import path from 'path';
+
 import { Bot, InputFile, type Api, type Context } from 'grammy';
 import { run, sequentialize, type RunnerHandle } from '@grammyjs/runner';
 
-import { OPERATOR_USER_ID, TELEGRAM_BOT_TOKEN } from './config.js';
+import {
+  OPERATOR_USER_ID,
+  TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES,
+  TELEGRAM_BOT_TOKEN,
+} from './config.js';
 import { insertMessage } from './db.js';
 import { logger } from './logger.js';
+import { rawDir } from './memory/scaffold.js';
+import { sanitizeFileName } from './slug.js';
 
 export interface InboundMessage {
   senderId: string;
@@ -14,6 +24,13 @@ export interface InboundMessage {
   command?: string;
   commandArgs?: string;
   telegramMsgId: string;
+}
+
+export interface DownloadedFile {
+  localPath: string;
+  originalName: string;
+  kind: 'document' | 'photo' | 'audio' | 'voice' | 'video';
+  sizeBytes: number;
 }
 
 export interface TelegramBotHandlers {
@@ -28,6 +45,144 @@ function parseCommand(text: string | undefined): { command: string; args: string
   const m = text.match(/^\/([A-Za-z][\w-]*)(?:@\w+)?\s*(.*)$/s);
   if (!m) return null;
   return { command: m[1].toLowerCase(), args: m[2].trim() };
+}
+
+// --- Attachment helpers -----------------------------------------------
+
+/**
+ * Loose shape of the fields we read off a Telegram message. grammY's own type
+ * is far larger; we only touch these.
+ */
+interface RawMessage {
+  message_id?: number;
+  text?: string;
+  caption?: string;
+  document?: { file_id?: string; file_name?: string; file_size?: number };
+  photo?: { file_id?: string; file_size?: number }[];
+  audio?: { file_id?: string; file_name?: string; mime_type?: string; file_size?: number };
+  voice?: { file_id?: string; file_size?: number };
+  video?: { file_id?: string; file_name?: string; file_size?: number };
+}
+
+/**
+ * Return the first attachment whose advertised size exceeds Telegram's 20 MB
+ * bot-download cap, or null. Photos are excluded — Telegram rescales them.
+ */
+export function detectOversizedAttachment(
+  m: RawMessage,
+): { name: string; sizeBytes: number } | null {
+  const candidates: { name: string; size?: number }[] = [];
+  if (m.document) candidates.push({ name: m.document.file_name || `doc_${m.message_id}`, size: m.document.file_size });
+  if (m.video) candidates.push({ name: m.video.file_name || `video_${m.message_id}.mp4`, size: m.video.file_size });
+  if (m.audio) candidates.push({ name: m.audio.file_name || `audio_${m.message_id}`, size: m.audio.file_size });
+  if (m.voice) candidates.push({ name: `voice_${m.message_id}.ogg`, size: m.voice.file_size });
+  for (const c of candidates) {
+    if (typeof c.size === 'number' && c.size > TELEGRAM_BOT_DOWNLOAD_LIMIT_BYTES) {
+      return { name: c.name, sizeBytes: c.size };
+    }
+  }
+  return null;
+}
+
+/** Build the agent prompt text from the caption plus one note per saved file. */
+export function buildContentWithFileNotes(text: string, files: DownloadedFile[]): string {
+  if (files.length === 0) return text;
+  const lines = files.map(
+    (f) => `[${f.kind}: ${f.originalName}] saved to raw/${path.basename(f.localPath)}`,
+  );
+  if (text) lines.push(text);
+  return lines.join('\n');
+}
+
+function formatBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+  return `${mb.toFixed(1)} MB`;
+}
+
+async function downloadTelegramFile(
+  api: Api,
+  token: string,
+  fileId: string,
+  fileName: string,
+): Promise<string | null> {
+  try {
+    const file = await api.getFile(fileId);
+    if (!file.file_path) {
+      logger.warn({ fileId }, 'getFile returned no file_path');
+      return null;
+    }
+    const dir = rawDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = sanitizeFileName(fileName);
+    let localPath = path.join(dir, safe);
+    if (fs.existsSync(localPath)) {
+      localPath = path.join(dir, `${Date.now()}_${safe}`);
+    }
+    const url = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+    await new Promise<void>((resolve, reject) => {
+      const out = fs.createWriteStream(localPath);
+      https
+        .get(url, (res) => {
+          if (res.statusCode !== 200) {
+            out.close();
+            try { fs.unlinkSync(localPath); } catch { /* ignore */ }
+            reject(new Error(`HTTP ${res.statusCode} downloading file`));
+            return;
+          }
+          res.pipe(out);
+          out.on('finish', () => { out.close(); resolve(); });
+          out.on('error', (err) => {
+            // Destroy the stream and remove the partial file so a failed
+            // download never leaves a truncated source behind.
+            out.destroy();
+            try { fs.unlinkSync(localPath); } catch { /* ignore */ }
+            reject(err);
+          });
+        })
+        .on('error', (err) => {
+          out.destroy();
+          try { fs.unlinkSync(localPath); } catch { /* ignore */ }
+          reject(err);
+        });
+    });
+    return localPath;
+  } catch (err) {
+    logger.error({ fileId, fileName, err }, 'downloadTelegramFile failed');
+    return null;
+  }
+}
+
+async function extractFiles(ctx: Context): Promise<DownloadedFile[]> {
+  const msg = ctx.message;
+  if (!msg) return [];
+  const out: DownloadedFile[] = [];
+  const push = async (
+    fileId: string,
+    name: string,
+    kind: DownloadedFile['kind'],
+  ): Promise<void> => {
+    const local = await downloadTelegramFile(ctx.api, TELEGRAM_BOT_TOKEN, fileId, name);
+    if (local) out.push({ localPath: local, originalName: name, kind, sizeBytes: fs.statSync(local).size });
+  };
+  if (msg.document) {
+    await push(msg.document.file_id, msg.document.file_name || `doc_${msg.document.file_id}`, 'document');
+  }
+  if (msg.photo && msg.photo.length > 0) {
+    const best = msg.photo[msg.photo.length - 1]; // largest size
+    await push(best.file_id, `photo_${msg.message_id}.jpg`, 'photo');
+  }
+  if (msg.audio) {
+    const ext = msg.audio.mime_type?.includes('mp3') ? 'mp3' : 'audio';
+    await push(msg.audio.file_id, msg.audio.file_name || `audio_${msg.audio.file_id}.${ext}`, 'audio');
+  }
+  if (msg.voice) {
+    await push(msg.voice.file_id, `voice_${msg.message_id}.ogg`, 'voice');
+  }
+  if (msg.video) {
+    await push(msg.video.file_id, msg.video.file_name || `video_${msg.message_id}.mp4`, 'video');
+  }
+  return out;
 }
 
 // --- Outbound helpers -------------------------------------------------
@@ -158,7 +313,17 @@ export function createBot(handlers: TelegramBotHandlers): Bot {
         return;
       }
 
-      const content = ctx.message?.text ?? ctx.message?.caption ?? '';
+      const oversized = detectOversizedAttachment((ctx.message ?? {}) as unknown as RawMessage);
+      if (oversized) {
+        await ctx.api.sendMessage(
+          chatId,
+          `[oversized: ${oversized.name} (${formatBytes(oversized.sizeBytes)}) not downloaded — ` +
+            `exceeds Telegram's 20 MB bot-download cap]`,
+        );
+      }
+      const files = oversized ? [] : await extractFiles(ctx);
+      const inboundText = ctx.message?.text ?? ctx.message?.caption ?? '';
+      const content = buildContentWithFileNotes(inboundText, files);
       insertMessage({
         telegramMsgId: String(ctx.message?.message_id ?? Date.now()),
         senderId,
