@@ -9,10 +9,16 @@ let tmpRoot: string;
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-scaffold-'));
   process.chdir(tmpRoot);
+  // Default RAW_DIR points at the real Windows Desktop, whose parent exists on
+  // dev hosts — that would make tests symlink data/raw to it. Pin RAW_DIR into
+  // the tmp tree so the suite never touches the real Desktop. Tests that
+  // exercise specific symlink/fallback branches override this themselves.
+  process.env.RAW_DIR = path.join(tmpRoot, 'raw-store');
   vi.resetModules();
 });
 afterEach(() => {
   process.chdir(realCwd);
+  delete process.env.RAW_DIR;
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
