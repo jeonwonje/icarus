@@ -46,4 +46,27 @@ describe('ensureDataLayout', () => {
     expect(created).toBe(false);
     expect(fs.readFileSync(path.join(dataDir(), 'index.md'), 'utf-8')).toBe('# customised\n');
   });
+
+  it('symlinks data/raw to RAW_DIR when its parent exists', async () => {
+    const desktop = path.join(tmpRoot, 'desktop');
+    fs.mkdirSync(desktop, { recursive: true });
+    process.env.RAW_DIR = path.join(desktop, 'icarus-raw');
+    const { ensureDataLayout, rawDir } = await import('../src/memory/scaffold.js');
+    ensureDataLayout();
+    const link = rawDir();
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.realpathSync(link)).toBe(fs.realpathSync(process.env.RAW_DIR));
+    delete process.env.RAW_DIR;
+  });
+
+  it('falls back to a real local data/raw when the RAW_DIR parent is missing', async () => {
+    process.env.RAW_DIR = path.join(tmpRoot, 'no-such-mount', 'deep', 'icarus-raw');
+    const { ensureDataLayout, rawDir } = await import('../src/memory/scaffold.js');
+    ensureDataLayout();
+    const link = rawDir();
+    const st = fs.lstatSync(link);
+    expect(st.isSymbolicLink()).toBe(false);
+    expect(st.isDirectory()).toBe(true);
+    delete process.env.RAW_DIR;
+  });
 });

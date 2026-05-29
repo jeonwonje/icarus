@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from '../config.js';
+import { DATA_DIR, RAW_DIR } from '../config.js';
 import { logger } from '../logger.js';
 
 export function dataDir(): string {
@@ -20,12 +20,45 @@ export function outboxDir(): string {
   return path.join(DATA_DIR, 'outbox');
 }
 
+export function rawDir(): string {
+  return path.join(DATA_DIR, 'raw');
+}
+
 export function indexFile(): string {
   return path.join(DATA_DIR, 'index.md');
 }
 
 export function logFile(): string {
   return path.join(DATA_DIR, 'log.md');
+}
+
+/**
+ * Ensure data/raw points at the source tree. Normal case: symlink data/raw to
+ * RAW_DIR (a Windows-Desktop folder) so files are browsable from Windows while
+ * the agent still cites them as raw/<file>. If RAW_DIR's parent doesn't exist
+ * (e.g. running off-Windows with no /mnt/c), fall back to a real local
+ * data/raw directory so the bot still runs. No-op if data/raw already exists.
+ */
+function ensureRawLink(): boolean {
+  const link = rawDir();
+  let existing: fs.Stats | null = null;
+  try {
+    existing = fs.lstatSync(link);
+  } catch {
+    existing = null;
+  }
+  if (existing) return false; // real dir or symlink already present — leave it
+
+  const parent = path.dirname(RAW_DIR);
+  if (fs.existsSync(parent)) {
+    fs.mkdirSync(RAW_DIR, { recursive: true });
+    fs.symlinkSync(RAW_DIR, link);
+    logger.info({ link, target: RAW_DIR }, 'raw/ symlinked to source tree');
+  } else {
+    fs.mkdirSync(link, { recursive: true });
+    logger.warn({ target: RAW_DIR, parent }, 'RAW_DIR parent missing; using local data/raw');
+  }
+  return true;
 }
 
 /**
@@ -40,6 +73,7 @@ export function ensureDataLayout(): boolean {
       created = true;
     }
   }
+  if (ensureRawLink()) created = true;
   if (!fs.existsSync(indexFile())) {
     fs.writeFileSync(
       indexFile(),
