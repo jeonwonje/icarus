@@ -10,6 +10,9 @@ data/wiki/
 data/outbox/
 data/index.md
 data/log.md
+# Source tree: normally a symlink to RAW_DIR (your Desktop); a real local dir
+# in the off-Windows fallback. Its contents are private, never tracked.
+data/raw
 
 .env
 
