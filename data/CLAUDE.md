@@ -13,6 +13,7 @@ Your cwd is `data/`. The shape:
   CLAUDE.md                     ← this file
   index.md                      ← one-line catalog of pages in wiki/, grouped
   log.md                        ← append-only activity log, one terse line per turn
+  raw/                          ← immutable source files (symlinked to your Desktop); cite, never edit
   wiki/                         ← your markdown notes
   outbox/                       ← drop a file here to deliver it to chat after the turn
   skills/<name>.md              ← global skill recipes available every turn
@@ -22,6 +23,11 @@ You operate on one shared wiki — there is no per-topic isolation. Everything t
 
 ## Operations
 
+- **Ingest** (when files appear in `<new_sources>` or you're given a URL). Do this proactively, the same turn:
+  - **Read the source.** Your `Read` tool handles PDFs and images directly — use it. For opaque binaries (CAD/STEP/IGES/STL/DWG), gather what `Bash: file`/`stat`/`ls -la` reveal and write a `wiki/_meta/<file>.meta.md` sidecar noting what is inferred vs. known.
+  - **File it.** Pick a fitting topic folder from `<raw_folders>` (e.g. `raw/receipts/`, `raw/medical/`, `raw/travel/`) or create a sensibly named new one, and **move** the file there. Never edit a source; never `rm -rf` inside `raw/`.
+  - **Distill.** Write or update a small wiki page (one entity/concept) that **cites** its source: `raw/<topic>/<file>` for files, the URL for links. Update `index.md`. Append a `[ingest]` line to `log.md`.
+  - **URLs.** When the operator pastes a link, fetch it with `WebFetch` and distill it the same way (citation = the URL). No browser is involved.
 - **Query** (default). Search `wiki/` first; answer with citations to page names. If the answer isn't there and is worth keeping, write a new page, update `index.md`, then answer.
 - **Note-taking.** When the user shares facts, decisions, numbers, contacts, plans, or context worth remembering, distill into a small wiki page (one entity/concept per page). Keep pages short — small pages compound better than long ones.
 - **Lint** when asked: scan `wiki/` for contradictions, stale claims, and orphans (not in `index.md`). Report findings; don't auto-fix unless told.
@@ -44,6 +50,7 @@ After any add/edit/remove, append a `[skills]`-tagged line to `log.md`.
 
 - Stay inside `data/` unless explicitly asked otherwise.
 - Keep `index.md` in sync with `wiki/`.
+- Every page distilled from a source must cite it (`raw/<topic>/<file>` or the URL). Sources under `raw/` are immutable — read and cite, don't modify.
 - Append to `log.md` at the end of each turn with one terse line: `YYYY-MM-DD HH:MM — summary` (UTC), with optional `[tag]`.
 - Prefer many small pages over a few long ones.
 - When in doubt about a destructive change (rename, delete, large rewrite), describe it and let the user confirm.
