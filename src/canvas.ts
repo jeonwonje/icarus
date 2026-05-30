@@ -9,6 +9,52 @@ export interface ManifestEntry {
   path: string;
 }
 
+export interface CanvasConfig {
+  baseUrl: string;
+  token: string;
+  fetchImpl?: typeof fetch;
+}
+
+export interface CanvasFile {
+  id: number;
+  display_name: string;
+  url: string;
+  size: number;
+  updated_at: string;
+  locked_for_user?: boolean;
+}
+
+/** GET a Canvas collection, following the RFC5988 Link `rel="next"` chain. */
+async function getPaged<T>(cfg: CanvasConfig, startUrl: string): Promise<T[]> {
+  const doFetch = cfg.fetchImpl ?? fetch;
+  const out: T[] = [];
+  let url: string | null = startUrl;
+  while (url) {
+    const res = await doFetch(url, { headers: { Authorization: `Bearer ${cfg.token}` } });
+    if (!res.ok) throw new Error(`Canvas ${res.status} for ${url}`);
+    out.push(...((await res.json()) as T[]));
+    url = parseNextLink(res.headers.get('link'));
+  }
+  return out;
+}
+
+/** The operator's active-enrollment courses. */
+export function listActiveCourses(cfg: CanvasConfig): Promise<Course[]> {
+  return getPaged<Course>(
+    cfg,
+    `${cfg.baseUrl}/api/v1/courses?enrollment_state=active&per_page=100`,
+  );
+}
+
+/** Files in a course, excluding ones the user can't access. */
+export async function listCourseFiles(cfg: CanvasConfig, courseId: number): Promise<CanvasFile[]> {
+  const files = await getPaged<CanvasFile>(
+    cfg,
+    `${cfg.baseUrl}/api/v1/courses/${courseId}/files?per_page=100`,
+  );
+  return files.filter((f) => !f.locked_for_user);
+}
+
 /** Extract the `rel="next"` URL from an RFC5988 Link header, or null. */
 export function parseNextLink(linkHeader: string | null): string | null {
   if (!linkHeader) return null;
