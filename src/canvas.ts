@@ -173,6 +173,7 @@ const OWNER_WRITE = 0o644;
 export interface SyncSummary {
   courses: number;
   downloaded: number;
+  announcements: number;
   skipped: number;
   failed: number;
   bytes: number;
@@ -219,7 +220,15 @@ async function writeReadOnly(dest: string, buf: Buffer): Promise<void> {
  */
 export async function syncCanvas(cfg: CanvasConfig, opts: SyncOpts): Promise<SyncSummary> {
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-  const summary: SyncSummary = { courses: 0, downloaded: 0, skipped: 0, failed: 0, bytes: 0, errors: [] };
+  const summary: SyncSummary = {
+    courses: 0,
+    downloaded: 0,
+    announcements: 0,
+    skipped: 0,
+    failed: 0,
+    bytes: 0,
+    errors: [],
+  };
 
   fs.mkdirSync(opts.canvasDir, { recursive: true });
   const manifestPath = path.join(opts.canvasDir, '.manifest.json');
@@ -260,6 +269,50 @@ export async function syncCanvas(cfg: CanvasConfig, opts: SyncOpts): Promise<Syn
         } catch (err) {
           summary.failed++;
           summary.errors.push(`${courseDirName(course)}/${file.display_name}: ${(err as Error).message}`);
+        }
+      }
+
+      // Announcements (markdown) + their accessible attachments.
+      const anns = await listCourseAnnouncements(cfg, course.id);
+      const annDir = path.join(courseDir, 'announcements');
+      if (anns.length) fs.mkdirSync(annDir, { recursive: true });
+      for (const ann of anns) {
+        const slug = announcementSlug(ann);
+        const targets = (ann.attachments ?? []).filter(
+          (f) => f.url && !f.locked_for_user && f.size <= maxBytes,
+        );
+        const attachNames = targets.map((f) => `${slug}--${sanitizeName(f.display_name)}`);
+
+        const mdDest = path.join(annDir, `${slug}.md`);
+        if (needsDownload({ updated_at: ann.posted_at ?? '' }, manifest[`ann:${ann.id}`], fs.existsSync(mdDest))) {
+          await writeReadOnly(mdDest, Buffer.from(renderAnnouncement(ann, attachNames), 'utf-8'));
+          manifest[`ann:${ann.id}`] = {
+            updated_at: ann.posted_at ?? '',
+            path: path.relative(opts.canvasDir, mdDest),
+          };
+          await persistManifest();
+          summary.announcements++;
+        } else {
+          summary.skipped++;
+        }
+
+        for (const att of targets) {
+          const dest = path.join(annDir, `${slug}--${sanitizeName(att.display_name)}`);
+          if (!needsDownload(att, manifest[`att:${att.id}`], fs.existsSync(dest))) {
+            summary.skipped++;
+            continue;
+          }
+          try {
+            const buf = await downloadFile(cfg, att.url);
+            await writeReadOnly(dest, buf);
+            manifest[`att:${att.id}`] = { updated_at: att.updated_at, path: path.relative(opts.canvasDir, dest) };
+            await persistManifest();
+            summary.downloaded++;
+            summary.bytes += buf.length;
+          } catch (err) {
+            summary.failed++;
+            summary.errors.push(`${courseDirName(course)}/announcements/${att.display_name}: ${(err as Error).message}`);
+          }
         }
       }
     } catch (err) {
