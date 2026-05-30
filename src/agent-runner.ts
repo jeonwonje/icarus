@@ -1,10 +1,12 @@
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 
 import { AGENT_IDLE_TIMEOUT_MS, AGENT_TIMEOUT_MS } from './config.js';
 import { clearSession } from './db.js';
 import { logger } from './logger.js';
 import { dataDir } from './memory/scaffold.js';
+import { buildSandboxArgs, resolveRawTarget, shouldSandbox } from './sandbox.js';
 import type { AgentEventHandler, AgentInput, AgentOutput } from './agent-types.js';
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
@@ -57,10 +59,33 @@ async function runAgentInner(
 
   if (input.sessionId) args.push('--resume', input.sessionId);
 
-  logger.info({ sessionId: input.sessionId, cwd }, 'Spawning agent');
+  const decision = shouldSandbox();
+  if (decision.error) {
+    return { status: 'error', result: null, error: decision.error };
+  }
+  if (decision.reason === 'unavailable') {
+    logger.warn({}, 'AGENT_SANDBOX=auto but bwrap unavailable — running unsandboxed');
+  }
+
+  let command = CLAUDE_BIN;
+  let commandArgs = args;
+  if (decision.enabled && decision.bwrap) {
+    const sandboxArgs = buildSandboxArgs({
+      dataDir: cwd,
+      rawTarget: resolveRawTarget(cwd),
+      home: os.homedir(),
+    });
+    command = decision.bwrap;
+    commandArgs = [...sandboxArgs, CLAUDE_BIN, ...args];
+  }
+
+  logger.info(
+    { sessionId: input.sessionId, cwd, sandbox: decision.enabled },
+    'Spawning agent',
+  );
 
   return new Promise<AgentOutput>((resolve) => {
-    const proc: ChildProcess = spawn(CLAUDE_BIN, args, {
+    const proc: ChildProcess = spawn(command, commandArgs, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
