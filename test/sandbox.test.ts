@@ -2,7 +2,7 @@ import path from 'path';
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { buildSandboxArgs, sandboxMode, shouldSandbox, decideSandbox } from '../src/sandbox.js';
+import { buildSandboxArgs, sandboxMode, shouldSandbox, decideSandbox, parseSandboxMounts } from '../src/sandbox.js';
 
 const DATA = '/home/jeon/icarus/data';
 const HOME = '/home/jeon';
@@ -144,5 +144,71 @@ describe('decideSandbox', () => {
     const d = decideSandbox('on', 'darwin', B);
     expect(d.enabled).toBe(false);
     expect(d.reason).toBe('unavailable');
+  });
+});
+
+describe('parseSandboxMounts', () => {
+  it('parses a single name=path entry', () => {
+    expect(parseSandboxMounts('onedrive=/mnt/c/OneDrive')).toEqual([
+      { name: 'onedrive', target: '/mnt/c/OneDrive' },
+    ]);
+  });
+  it('parses multiple ;-separated entries', () => {
+    expect(parseSandboxMounts('a=/mnt/c/a;b=/mnt/c/b')).toEqual([
+      { name: 'a', target: '/mnt/c/a' },
+      { name: 'b', target: '/mnt/c/b' },
+    ]);
+  });
+  it('keeps spaces in the target path', () => {
+    expect(parseSandboxMounts('od=/mnt/c/One Drive - NUS')).toEqual([
+      { name: 'od', target: '/mnt/c/One Drive - NUS' },
+    ]);
+  });
+  it('trims whitespace around name and path', () => {
+    expect(parseSandboxMounts(' od = /mnt/c/x ')).toEqual([{ name: 'od', target: '/mnt/c/x' }]);
+  });
+  it('returns [] for empty/whitespace input', () => {
+    expect(parseSandboxMounts('')).toEqual([]);
+    expect(parseSandboxMounts('   ')).toEqual([]);
+  });
+  it('skips entries with empty name, slash in name, or relative target', () => {
+    expect(parseSandboxMounts('=/mnt/c/x')).toEqual([]);
+    expect(parseSandboxMounts('a/b=/mnt/c/x')).toEqual([]);
+    expect(parseSandboxMounts('rel=relative/path')).toEqual([]);
+  });
+  it('ignores empty segments from stray semicolons', () => {
+    expect(parseSandboxMounts('a=/mnt/c/a;;')).toEqual([{ name: 'a', target: '/mnt/c/a' }]);
+  });
+});
+
+describe('buildSandboxArgs extraMounts', () => {
+  function bindTryPairs(args: string[]): Array<[string, string]> {
+    const out: Array<[string, string]> = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--bind-try') out.push([args[i + 1], args[i + 2]]);
+    }
+    return out;
+  }
+  it('binds an external extra mount read-write via --bind-try', () => {
+    const a = buildSandboxArgs({ dataDir: DATA, rawTarget: null, home: HOME, extraMounts: ['/mnt/c/OneDrive'] });
+    expect(bindTryPairs(a)).toContainEqual(['/mnt/c/OneDrive', '/mnt/c/OneDrive']);
+  });
+  it('omits an extra mount nested inside dataDir', () => {
+    const a = buildSandboxArgs({ dataDir: DATA, rawTarget: null, home: HOME, extraMounts: [DATA + '/sub'] });
+    expect(bindTryPairs(a)).not.toContainEqual([DATA + '/sub', DATA + '/sub']);
+  });
+  it('omits an extra mount inside the raw target', () => {
+    const raw = '/mnt/c/raw';
+    const a = buildSandboxArgs({ dataDir: DATA, rawTarget: raw, home: HOME, extraMounts: [raw + '/x'] });
+    expect(bindTryPairs(a)).not.toContainEqual([raw + '/x', raw + '/x']);
+  });
+  it('binds a duplicate extra mount only once', () => {
+    const a = buildSandboxArgs({ dataDir: DATA, rawTarget: null, home: HOME, extraMounts: ['/mnt/c/d', '/mnt/c/d'] });
+    expect(bindTryPairs(a).filter(([s]) => s === '/mnt/c/d')).toHaveLength(1);
+  });
+  it('no extraMounts leaves output identical to before', () => {
+    const base = buildSandboxArgs({ dataDir: DATA, rawTarget: null, home: HOME });
+    const withEmpty = buildSandboxArgs({ dataDir: DATA, rawTarget: null, home: HOME, extraMounts: [] });
+    expect(withEmpty).toEqual(base);
   });
 });

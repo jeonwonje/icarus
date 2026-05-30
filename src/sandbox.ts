@@ -5,6 +5,33 @@ export interface SandboxOpts {
   dataDir: string;
   rawTarget: string | null;
   home: string;
+  /** Operator-specified absolute paths to bind read-write (SANDBOX_MOUNTS). */
+  extraMounts?: string[];
+}
+
+export interface SandboxMount {
+  name: string;
+  target: string;
+}
+
+/**
+ * Parse SANDBOX_MOUNTS: `name=path` entries separated by `;`. Keeps an entry
+ * only when name is non-empty and slash-free and target is absolute; invalid
+ * or empty segments are dropped.
+ */
+export function parseSandboxMounts(raw: string): SandboxMount[] {
+  const out: SandboxMount[] = [];
+  for (const seg of (raw ?? '').split(';')) {
+    const s = seg.trim();
+    if (!s) continue;
+    const eq = s.indexOf('=');
+    if (eq === -1) continue;
+    const name = s.slice(0, eq).trim();
+    const target = s.slice(eq + 1).trim();
+    if (!name || name.includes('/') || !path.isAbsolute(target)) continue;
+    out.push({ name, target });
+  }
+  return out;
 }
 
 /** True when `child` is `parent` itself or nested under it. */
@@ -36,6 +63,18 @@ export function buildSandboxArgs(opts: SandboxOpts): string[] {
 
   if (rawTarget && !isInside(dataDir, rawTarget)) {
     args.push('--bind', rawTarget, rawTarget);
+  }
+
+  // Operator-specified extra mounts (read-write). --bind-try so a temporarily
+  // absent target (e.g. unsynced OneDrive) doesn't abort the spawn. Skip any
+  // already covered by data/ or the raw target, and dedupe.
+  const seen = new Set<string>();
+  for (const target of opts.extraMounts ?? []) {
+    if (seen.has(target)) continue;
+    if (isInside(dataDir, target)) continue;
+    if (rawTarget && isInside(rawTarget, target)) continue;
+    seen.add(target);
+    args.push('--bind-try', target, target);
   }
 
   // Claude needs to write session transcripts and refresh credentials.
