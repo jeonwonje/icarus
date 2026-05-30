@@ -60,6 +60,63 @@ export async function listCourseFiles(cfg: CanvasConfig, courseId: number): Prom
   return files.filter((f) => !f.locked_for_user);
 }
 
+export interface Announcement {
+  id: number;
+  title?: string;
+  posted_at?: string;
+  message?: string;
+  user_name?: string;
+  html_url?: string;
+  attachments?: CanvasFile[];
+}
+
+/** A course's announcements (newest-first as Canvas returns them). */
+export function listCourseAnnouncements(cfg: CanvasConfig, courseId: number): Promise<Announcement[]> {
+  return getPaged<Announcement>(
+    cfg,
+    `${cfg.baseUrl}/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=100`,
+  );
+}
+
+/** Convert announcement HTML to readable plain text (dependency-free). */
+export function htmlToText(html: string): string {
+  return (html ?? '')
+    .replace(/<\s*(br|\/p|\/div|\/li|\/h[1-6])\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** `<date>-<sanitized title>` slug for an announcement's filenames. */
+export function announcementSlug(a: Announcement): string {
+  const date = (a.posted_at ?? '').slice(0, 10) || 'undated';
+  return `${date}-${sanitizeName(a.title || 'untitled')}`;
+}
+
+/** Render an announcement as markdown, listing its attachment filenames. */
+export function renderAnnouncement(a: Announcement, attachmentNames: string[]): string {
+  const lines = [
+    `# ${a.title ?? 'Untitled'}`,
+    '',
+    `- Posted: ${a.posted_at ?? 'unknown'}`,
+    `- Author: ${a.user_name ?? 'unknown'}`,
+    `- Source: ${a.html_url ?? ''}`,
+    '',
+    htmlToText(a.message ?? ''),
+  ];
+  if (attachmentNames.length) {
+    lines.push('', '## Attachments', ...attachmentNames.map((n) => `- ${n}`));
+  }
+  return lines.join('\n') + '\n';
+}
+
 /** Extract the `rel="next"` URL from an RFC5988 Link header, or null. */
 export function parseNextLink(linkHeader: string | null): string | null {
   if (!linkHeader) return null;
