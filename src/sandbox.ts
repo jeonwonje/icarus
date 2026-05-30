@@ -1,5 +1,4 @@
 import fs from 'fs';
-import { execFileSync } from 'child_process';
 import path from 'path';
 
 export interface SandboxOpts {
@@ -24,6 +23,9 @@ function isInside(parent: string, child: string): boolean {
  */
 export function buildSandboxArgs(opts: SandboxOpts): string[] {
   const { dataDir, rawTarget, home } = opts;
+  if (!path.isAbsolute(dataDir) || !path.isAbsolute(home)) {
+    throw new Error('buildSandboxArgs requires absolute dataDir and home');
+  }
   const args: string[] = [
     '--ro-bind', '/', '/',
     '--dev', '/dev',
@@ -63,22 +65,29 @@ export function resolveRawTarget(dataDir: string): string | null {
 }
 
 let bwrapCache: string | null | undefined;
-/** Absolute path to bwrap on PATH, or null. Cached after first lookup. */
+/** Absolute path to an executable `bwrap` on PATH, or null. Cached. */
 export function bwrapPath(): string | null {
   if (bwrapCache !== undefined) return bwrapCache;
-  try {
-    bwrapCache = execFileSync('bash', ['-lc', 'command -v bwrap'], {
-      encoding: 'utf8',
-    }).trim() || null;
-  } catch {
-    bwrapCache = null;
+  const dirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    const candidate = path.join(dir, 'bwrap');
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      bwrapCache = candidate;
+      return bwrapCache;
+    } catch {
+      // not executable here; keep scanning
+    }
   }
+  bwrapCache = null;
   return bwrapCache;
 }
 
 export interface SandboxDecision {
   enabled: boolean;
   bwrap: string | null;
+  /** Why this decision was reached — lets the caller log appropriately. */
+  reason: 'off' | 'enabled' | 'unavailable';
   /** Set when mode is 'on' but bwrap is unavailable: hard error for the caller. */
   error?: string;
 }
@@ -86,13 +95,15 @@ export interface SandboxDecision {
 /** Decide whether to sandbox this spawn given mode + platform + bwrap. */
 export function shouldSandbox(): SandboxDecision {
   const mode = sandboxMode();
-  if (mode === 'off') return { enabled: false, bwrap: null };
+  if (mode === 'off') return { enabled: false, bwrap: null, reason: 'off' };
   const bwrap = process.platform === 'linux' ? bwrapPath() : null;
-  if (mode === 'on') {
-    if (!bwrap) {
-      return { enabled: false, bwrap: null, error: 'AGENT_SANDBOX=on but bwrap not found on PATH' };
-    }
-    return { enabled: true, bwrap };
+  if (!bwrap) {
+    return {
+      enabled: false,
+      bwrap: null,
+      reason: 'unavailable',
+      error: mode === 'on' ? 'AGENT_SANDBOX=on but bwrap not found on PATH' : undefined,
+    };
   }
-  return { enabled: Boolean(bwrap), bwrap };
+  return { enabled: true, bwrap, reason: 'enabled' };
 }

@@ -2,7 +2,7 @@ import path from 'path';
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { buildSandboxArgs } from '../src/sandbox.js';
+import { buildSandboxArgs, sandboxMode, shouldSandbox } from '../src/sandbox.js';
 
 const DATA = '/home/jeon/icarus/data';
 const HOME = '/home/jeon';
@@ -71,8 +71,6 @@ describe('buildSandboxArgs', () => {
   });
 });
 
-import { sandboxMode } from '../src/sandbox.js';
-
 describe('sandboxMode', () => {
   const prev = process.env.AGENT_SANDBOX;
   afterEach(() => {
@@ -94,5 +92,27 @@ describe('sandboxMode', () => {
     expect(sandboxMode()).toBe('on');
     process.env.AGENT_SANDBOX = 'off';
     expect(sandboxMode()).toBe('off');
+  });
+});
+
+describe('shouldSandbox (off is deterministic)', () => {
+  const prev = process.env.AGENT_SANDBOX;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENT_SANDBOX;
+    else process.env.AGENT_SANDBOX = prev;
+  });
+
+  it('reports reason "off" and disabled when AGENT_SANDBOX=off', () => {
+    process.env.AGENT_SANDBOX = 'off';
+    const d = shouldSandbox();
+    expect(d.enabled).toBe(false);
+    expect(d.reason).toBe('off');
+    expect(d.error).toBeUndefined();
+  });
+});
+
+describe('buildSandboxArgs guards', () => {
+  it('throws on a relative dataDir', () => {
+    expect(() => buildSandboxArgs({ dataDir: 'data', rawTarget: null, home: '/home/jeon' })).toThrow();
   });
 });
