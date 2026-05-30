@@ -8,7 +8,7 @@ import { Bot } from 'grammy';
 // Force IPv4-first so outbound HTTPS picks a reachable route.
 setDefaultResultOrder('ipv4first');
 
-import { handleAdminCommand } from './admin-commands.js';
+import { handleAdminCommand, handleCanvas } from './admin-commands.js';
 import { runAgent } from './agent-runner.js';
 import {
   getSession,
@@ -100,6 +100,16 @@ async function runTurn(
 }
 
 async function onMessage(bot: Bot, msg: InboundMessage): Promise<void> {
+  // /canvas can sync >1GB; run it in the background so it never blocks the
+  // message loop. Ack immediately, report the summary when it finishes.
+  if (msg.isCommand && msg.command === 'canvas') {
+    await sendText(bot.api, msg.chatId, 'Syncing Canvas in the background — I’ll report when it finishes.');
+    void handleCanvas()
+      .then((r) => (r.reply ? sendText(bot.api, msg.chatId, r.reply) : undefined))
+      .catch((err) => sendText(bot.api, msg.chatId, `Canvas sync error: ${(err as Error).message}`));
+    return;
+  }
+
   // Route bot-local commands without spawning the agent.
   if (msg.isCommand && msg.command) {
     const adminRes = await handleAdminCommand({

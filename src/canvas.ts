@@ -145,11 +145,14 @@ async function downloadFile(cfg: CanvasConfig, url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-/** Write `buf` to `dest` as a read-only file, clearing a prior read-only bit. */
-function writeReadOnly(dest: string, buf: Buffer): void {
-  if (fs.existsSync(dest)) fs.chmodSync(dest, OWNER_WRITE);
-  fs.writeFileSync(dest, buf);
-  fs.chmodSync(dest, READ_ONLY);
+/**
+ * Write `buf` to `dest` as a read-only file, clearing a prior read-only bit.
+ * Async so large writes to slow (drvfs) storage don't stall the event loop.
+ */
+async function writeReadOnly(dest: string, buf: Buffer): Promise<void> {
+  if (fs.existsSync(dest)) await fs.promises.chmod(dest, OWNER_WRITE);
+  await fs.promises.writeFile(dest, buf);
+  await fs.promises.chmod(dest, READ_ONLY);
 }
 
 /**
@@ -164,6 +167,8 @@ export async function syncCanvas(cfg: CanvasConfig, opts: SyncOpts): Promise<Syn
   fs.mkdirSync(opts.canvasDir, { recursive: true });
   const manifestPath = path.join(opts.canvasDir, '.manifest.json');
   const manifest = loadManifest(manifestPath);
+  const persistManifest = () =>
+    fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 
   const courses = (await listActiveCourses(cfg)).filter((c) =>
     courseAllowed(c, opts.coursesFilter ?? ''),
@@ -188,8 +193,11 @@ export async function syncCanvas(cfg: CanvasConfig, opts: SyncOpts): Promise<Syn
         }
         try {
           const buf = await downloadFile(cfg, file.url);
-          writeReadOnly(dest, buf);
+          await writeReadOnly(dest, buf);
           manifest[file.id] = { updated_at: file.updated_at, path: path.relative(opts.canvasDir, dest) };
+          // Persist after each file so an interrupted sync resumes instead of
+          // re-downloading everything next run.
+          await persistManifest();
           summary.downloaded++;
           summary.bytes += buf.length;
         } catch (err) {
@@ -203,6 +211,6 @@ export async function syncCanvas(cfg: CanvasConfig, opts: SyncOpts): Promise<Syn
     }
   }
 
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  await persistManifest();
   return summary;
 }

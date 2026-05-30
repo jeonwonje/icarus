@@ -77,8 +77,8 @@ export async function handleAdminCommand(ctx: AdminCtx): Promise<AdminResult> {
       return handleWhoami(ctx.callerUserId);
     case 'help':
       return handleHelp();
-    case 'canvas':
-      return handleCanvas();
+    // 'canvas' is intercepted in index.ts and run in the background (it can be a
+    // multi-GB sync), so it is not handled inline here.
     default:
       return { handled: false };
   }
