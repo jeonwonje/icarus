@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   const sec = Math.round((Date.now() - started) / 1000);
   logger.info({ ...s, sec }, 'canvas sync complete');
   console.log(
-    `Canvas: ${s.downloaded} new, ${s.skipped} unchanged, ${s.failed} failed across ${s.courses} courses · ${(s.bytes / 1e6).toFixed(1)} MB in ${sec}s`,
+    `Canvas: ${s.downloaded} new files, ${s.announcements} new announcements, ${s.skipped} unchanged, ${s.failed} failed across ${s.courses} courses · ${(s.bytes / 1e6).toFixed(1)} MB in ${sec}s`,
   );
   for (const e of s.errors.slice(0, 10)) console.error(`  ✗ ${e}`);
   if (s.failed > 0 && s.downloaded === 0) process.exit(1);

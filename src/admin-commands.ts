@@ -59,7 +59,7 @@ export async function handleCanvas(token: string = CANVAS_API_TOKEN): Promise<Ad
       { canvasDir: path.join(rawDir(), 'canvas'), coursesFilter: CANVAS_COURSES },
     );
     const mb = (s.bytes / 1e6).toFixed(1);
-    let reply = `Canvas: ${s.downloaded} new, ${s.skipped} unchanged, ${s.failed} failed across ${s.courses} courses · ${mb} MB`;
+    let reply = `Canvas: ${s.downloaded} new files, ${s.announcements} new announcements, ${s.skipped} unchanged, ${s.failed} failed across ${s.courses} courses · ${mb} MB`;
     if (s.errors.length) {
       reply += `\nErrors:\n- ${s.errors.slice(0, 5).join('\n- ')}`;
     }
