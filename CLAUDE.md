@@ -66,3 +66,4 @@ npm test
 - SQLite db lives in `state/`, separate from the wiki.
 - One Claude session, keyed `'life'`. The weekly-prune script reuses it.
 - Slash commands handled by the bot: `/whoami`, `/ping`, `/help`. Anything else is forwarded verbatim to the claude subprocess.
+- The per-turn `claude` subprocess runs inside a bubblewrap (`bwrap`) sandbox: the whole filesystem is read-only except `data/`, the resolved `raw/` target, and `~/.claude` state. This is the FS wall that stops the agent editing its own source (`src/`). Toggle with `AGENT_SANDBOX` (`auto` default — on when `bwrap` is present on Linux; `on` to require it, erroring if missing; `off` to disable). Built in `src/sandbox.ts`, wired in `src/agent-runner.ts`.
