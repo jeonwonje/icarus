@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, RAW_DIR } from '../config.js';
+import { DATA_DIR, RAW_DIR, SANDBOX_MOUNTS } from '../config.js';
 import { logger } from '../logger.js';
+import { parseSandboxMounts, type SandboxMount } from '../sandbox.js';
 
 export function dataDir(): string {
   return DATA_DIR;
@@ -62,6 +63,44 @@ function ensureRawLink(): boolean {
 }
 
 /**
+ * For each operator-specified mount, ensure raw/<name> symlinks to its target.
+ * Refreshes a stale symlink so editing SANDBOX_MOUNTS re-points it; never
+ * overwrites a real file/dir; skips a missing target (the sandbox bind is
+ * --bind-try, so it tolerates absence too).
+ */
+export function ensureSandboxMounts(mounts: SandboxMount[]): boolean {
+  let changed = false;
+  for (const { name, target } of mounts) {
+    if (!fs.existsSync(target)) {
+      logger.warn({ name, target }, 'SANDBOX_MOUNTS target missing; skipping');
+      continue;
+    }
+    const link = path.join(rawDir(), name);
+    let existing: fs.Stats | null = null;
+    try {
+      existing = fs.lstatSync(link);
+    } catch {
+      existing = null;
+    }
+    if (!existing) {
+      fs.symlinkSync(target, link);
+      logger.info({ link, target }, 'sandbox mount symlinked');
+      changed = true;
+    } else if (existing.isSymbolicLink()) {
+      if (fs.readlinkSync(link) !== target) {
+        fs.unlinkSync(link);
+        fs.symlinkSync(target, link);
+        logger.info({ link, target }, 'sandbox mount symlink repointed');
+        changed = true;
+      }
+    } else {
+      logger.warn({ link }, 'raw/<name> is a real file/dir; refusing to overwrite');
+    }
+  }
+  return changed;
+}
+
+/**
  * Idempotently create the data/ skeleton: wiki/, outbox/, skills/, and seed
  * index.md + log.md if missing. data/CLAUDE.md ships in git.
  */
@@ -74,6 +113,7 @@ export function ensureDataLayout(): boolean {
     }
   }
   if (ensureRawLink()) created = true;
+  if (ensureSandboxMounts(parseSandboxMounts(SANDBOX_MOUNTS))) created = true;
   if (!fs.existsSync(indexFile())) {
     fs.writeFileSync(
       indexFile(),

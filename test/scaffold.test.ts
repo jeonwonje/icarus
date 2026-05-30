@@ -76,3 +76,58 @@ describe('ensureDataLayout', () => {
     delete process.env.RAW_DIR;
   });
 });
+
+describe('ensureSandboxMounts', () => {
+  it('symlinks raw/<name> to an existing target', async () => {
+    const target = path.join(tmpRoot, 'mount-target');
+    fs.mkdirSync(target);
+    const { ensureDataLayout, ensureSandboxMounts, rawDir } = await import(
+      '../src/memory/scaffold.js'
+    );
+    ensureDataLayout();
+    const changed = ensureSandboxMounts([{ name: 'ext', target }]);
+    expect(changed).toBe(true);
+    const link = path.join(rawDir(), 'ext');
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.realpathSync(link)).toBe(fs.realpathSync(target));
+  });
+
+  it('repoints a stale symlink when the target changes', async () => {
+    const a = path.join(tmpRoot, 'target-a');
+    const b = path.join(tmpRoot, 'target-b');
+    fs.mkdirSync(a);
+    fs.mkdirSync(b);
+    const { ensureDataLayout, ensureSandboxMounts, rawDir } = await import(
+      '../src/memory/scaffold.js'
+    );
+    ensureDataLayout();
+    ensureSandboxMounts([{ name: 'ext', target: a }]);
+    const changed = ensureSandboxMounts([{ name: 'ext', target: b }]);
+    expect(changed).toBe(true);
+    expect(fs.realpathSync(path.join(rawDir(), 'ext'))).toBe(fs.realpathSync(b));
+  });
+
+  it('skips a mount whose target does not exist', async () => {
+    const { ensureDataLayout, ensureSandboxMounts, rawDir } = await import(
+      '../src/memory/scaffold.js'
+    );
+    ensureDataLayout();
+    const changed = ensureSandboxMounts([{ name: 'gone', target: path.join(tmpRoot, 'nope') }]);
+    expect(changed).toBe(false);
+    expect(fs.existsSync(path.join(rawDir(), 'gone'))).toBe(false);
+  });
+
+  it('refuses to overwrite a real dir at raw/<name>', async () => {
+    const target = path.join(tmpRoot, 'mount-target');
+    fs.mkdirSync(target);
+    const { ensureDataLayout, ensureSandboxMounts, rawDir } = await import(
+      '../src/memory/scaffold.js'
+    );
+    ensureDataLayout();
+    const link = path.join(rawDir(), 'real');
+    fs.mkdirSync(link);
+    const changed = ensureSandboxMounts([{ name: 'real', target }]);
+    expect(changed).toBe(false);
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(false);
+  });
+});
