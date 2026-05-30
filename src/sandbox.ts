@@ -7,6 +7,8 @@ export interface SandboxOpts {
   home: string;
   /** Operator-specified absolute paths to bind read-write (SANDBOX_MOUNTS). */
   extraMounts?: string[];
+  /** Absolute paths to re-bind read-only (e.g. the Canvas mirror). */
+  readOnlyMounts?: string[];
 }
 
 export interface SandboxMount {
@@ -75,6 +77,15 @@ export function buildSandboxArgs(opts: SandboxOpts): string[] {
     if (rawTarget && isInside(rawTarget, target)) continue;
     seen.add(target);
     args.push('--bind-try', target, target);
+  }
+
+  // Read-only re-binds layered AFTER the writable binds so the subpath is
+  // read-only inside the sandbox even though its parent (raw/) is writable.
+  const roSeen = new Set<string>();
+  for (const p of opts.readOnlyMounts ?? []) {
+    if (!p || roSeen.has(p)) continue;
+    roSeen.add(p);
+    args.push('--ro-bind-try', p, p);
   }
 
   // Claude needs to write session transcripts and refresh credentials.
@@ -158,4 +169,14 @@ export function decideSandbox(
 /** Decide whether to sandbox this spawn given mode + platform + bwrap. */
 export function shouldSandbox(): SandboxDecision {
   return decideSandbox(sandboxMode(), process.platform, bwrapPath());
+}
+
+/** App secrets that the sandboxed claude subprocess has no need to receive. */
+const SECRET_ENV_KEYS = ['CANVAS_API_TOKEN', 'TELEGRAM_BOT_TOKEN', 'OPERATOR_USER_ID'];
+
+/** Shallow copy of env with app secrets removed (for the claude subprocess). */
+export function scrubSecretEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out = { ...env };
+  for (const k of SECRET_ENV_KEYS) delete out[k];
+  return out;
 }

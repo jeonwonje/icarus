@@ -1,12 +1,19 @@
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
+import path from 'path';
 
 import { AGENT_IDLE_TIMEOUT_MS, AGENT_TIMEOUT_MS, SANDBOX_MOUNTS } from './config.js';
 import { clearSession } from './db.js';
 import { logger } from './logger.js';
 import { dataDir } from './memory/scaffold.js';
-import { buildSandboxArgs, parseSandboxMounts, resolveRawTarget, shouldSandbox } from './sandbox.js';
+import {
+  buildSandboxArgs,
+  parseSandboxMounts,
+  resolveRawTarget,
+  scrubSecretEnv,
+  shouldSandbox,
+} from './sandbox.js';
 import type { AgentEventHandler, AgentInput, AgentOutput } from './agent-types.js';
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
@@ -70,11 +77,13 @@ async function runAgentInner(
   let command = CLAUDE_BIN;
   let commandArgs = args;
   if (decision.enabled && decision.bwrap) {
+    const rawTarget = resolveRawTarget(cwd);
     const sandboxArgs = buildSandboxArgs({
       dataDir: cwd,
-      rawTarget: resolveRawTarget(cwd),
+      rawTarget,
       home: os.homedir(),
       extraMounts: parseSandboxMounts(SANDBOX_MOUNTS).map((m) => m.target),
+      readOnlyMounts: rawTarget ? [path.join(rawTarget, 'canvas')] : [],
     });
     command = decision.bwrap;
     commandArgs = [...sandboxArgs, CLAUDE_BIN, ...args];
@@ -89,7 +98,7 @@ async function runAgentInner(
     const proc: ChildProcess = spawn(command, commandArgs, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: scrubSecretEnv(process.env),
     });
 
     let stdoutBuf = '';

@@ -212,3 +212,51 @@ describe('buildSandboxArgs extraMounts', () => {
     expect(withEmpty).toEqual(base);
   });
 });
+
+import { scrubSecretEnv } from '../src/sandbox.js';
+
+describe('buildSandboxArgs readOnlyMounts', () => {
+  const DATA2 = '/home/jeon/icarus/data';
+  const HOME2 = '/home/jeon';
+  it('appends --ro-bind-try after the writable binds', () => {
+    const a = buildSandboxArgs({
+      dataDir: DATA2,
+      rawTarget: null,
+      home: HOME2,
+      readOnlyMounts: ['/mnt/c/raw/canvas'],
+    });
+    let ro = -1;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] === '--ro-bind-try' && a[i + 1] === '/mnt/c/raw/canvas') ro = i;
+    }
+    expect(ro).toBeGreaterThan(a.indexOf('--bind')); // after the data/ rw bind
+    expect(a[ro + 2]).toBe('/mnt/c/raw/canvas');
+  });
+  it('dedupes and ignores empty entries', () => {
+    const a = buildSandboxArgs({
+      dataDir: DATA2,
+      rawTarget: null,
+      home: HOME2,
+      readOnlyMounts: ['/x', '/x', ''],
+    });
+    expect(a.filter((v, i) => v === '--ro-bind-try' && a[i + 1] === '/x')).toHaveLength(1);
+    expect(a.includes('')).toBe(false);
+  });
+});
+
+describe('scrubSecretEnv', () => {
+  it('removes app secrets but keeps everything else', () => {
+    const out = scrubSecretEnv({
+      CANVAS_API_TOKEN: 'x',
+      TELEGRAM_BOT_TOKEN: 'y',
+      OPERATOR_USER_ID: 'z',
+      PATH: '/bin',
+      HOME: '/home/jeon',
+    });
+    expect(out.CANVAS_API_TOKEN).toBeUndefined();
+    expect(out.TELEGRAM_BOT_TOKEN).toBeUndefined();
+    expect(out.OPERATOR_USER_ID).toBeUndefined();
+    expect(out.PATH).toBe('/bin');
+    expect(out.HOME).toBe('/home/jeon');
+  });
+});
