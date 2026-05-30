@@ -1,3 +1,8 @@
+import fs from 'fs';
+import path from 'path';
+
+import { logger } from './logger.js';
+
 export interface Course {
   id: number;
   course_code?: string;
@@ -102,4 +107,102 @@ export function needsDownload(
 ): boolean {
   if (!localExists || !entry) return true;
   return entry.updated_at !== file.updated_at;
+}
+
+const DEFAULT_MAX_BYTES = 100 * 1024 * 1024;
+const READ_ONLY = 0o444;
+const OWNER_WRITE = 0o644;
+
+export interface SyncSummary {
+  courses: number;
+  downloaded: number;
+  skipped: number;
+  failed: number;
+  bytes: number;
+  errors: string[];
+}
+
+export interface SyncOpts {
+  canvasDir: string;
+  coursesFilter?: string;
+  maxBytes?: number;
+}
+
+type Manifest = Record<string, ManifestEntry>;
+
+function loadManifest(file: string): Manifest {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as Manifest;
+  } catch {
+    return {};
+  }
+}
+
+async function downloadFile(cfg: CanvasConfig, url: string): Promise<Buffer> {
+  const doFetch = cfg.fetchImpl ?? fetch;
+  const res = await doFetch(url, { headers: { Authorization: `Bearer ${cfg.token}` } });
+  if (!res.ok) throw new Error(`download ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/** Write `buf` to `dest` as a read-only file, clearing a prior read-only bit. */
+function writeReadOnly(dest: string, buf: Buffer): void {
+  if (fs.existsSync(dest)) fs.chmodSync(dest, OWNER_WRITE);
+  fs.writeFileSync(dest, buf);
+  fs.chmodSync(dest, READ_ONLY);
+}
+
+/**
+ * Mirror active-course files into `canvasDir/<course>/<file>`, read-only and
+ * idempotent (a `.manifest.json` skips unchanged files). Per-file and per-course
+ * failures are counted, not fatal.
+ */
+export async function syncCanvas(cfg: CanvasConfig, opts: SyncOpts): Promise<SyncSummary> {
+  const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const summary: SyncSummary = { courses: 0, downloaded: 0, skipped: 0, failed: 0, bytes: 0, errors: [] };
+
+  fs.mkdirSync(opts.canvasDir, { recursive: true });
+  const manifestPath = path.join(opts.canvasDir, '.manifest.json');
+  const manifest = loadManifest(manifestPath);
+
+  const courses = (await listActiveCourses(cfg)).filter((c) =>
+    courseAllowed(c, opts.coursesFilter ?? ''),
+  );
+  summary.courses = courses.length;
+
+  for (const course of courses) {
+    const courseDir = path.join(opts.canvasDir, courseDirName(course));
+    try {
+      fs.mkdirSync(courseDir, { recursive: true });
+      const files = await listCourseFiles(cfg, course.id);
+      for (const file of files) {
+        if (file.size > maxBytes) {
+          summary.skipped++;
+          logger.warn({ file: file.display_name, size: file.size }, 'canvas: file over maxBytes; skipping');
+          continue;
+        }
+        const dest = path.join(courseDir, sanitizeName(file.display_name));
+        if (!needsDownload(file, manifest[file.id], fs.existsSync(dest))) {
+          summary.skipped++;
+          continue;
+        }
+        try {
+          const buf = await downloadFile(cfg, file.url);
+          writeReadOnly(dest, buf);
+          manifest[file.id] = { updated_at: file.updated_at, path: path.relative(opts.canvasDir, dest) };
+          summary.downloaded++;
+          summary.bytes += buf.length;
+        } catch (err) {
+          summary.failed++;
+          summary.errors.push(`${courseDirName(course)}/${file.display_name}: ${(err as Error).message}`);
+        }
+      }
+    } catch (err) {
+      summary.failed++;
+      summary.errors.push(`${courseDirName(course)}: ${(err as Error).message}`);
+    }
+  }
+
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  return summary;
 }
