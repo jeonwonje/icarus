@@ -2,7 +2,15 @@ import path from 'path';
 
 import { readEnvFile } from './env.js';
 
-const envConfig = readEnvFile(['TELEGRAM_BOT_TOKEN', 'OPERATOR_USER_ID', 'RAW_DIR', 'SANDBOX_MOUNTS']);
+const envConfig = readEnvFile([
+  'TELEGRAM_BOT_TOKEN',
+  'OPERATOR_USER_ID',
+  'RAW_DIR',
+  'SANDBOX_MOUNTS',
+  'CANVAS_BASE_URL',
+  'CANVAS_API_TOKEN',
+  'CANVAS_COURSES',
+]);
 
 function fromEnv(key: string): string | undefined {
   return process.env[key] || envConfig[key];
@@ -24,6 +32,12 @@ export const RAW_DIR = fromEnv('RAW_DIR') || '/mnt/c/Users/jeonw/Desktop/icarus-
 // as raw/<name>. Format: `name=abspath` entries separated by ';'. Parsed by
 // parseSandboxMounts in sandbox.ts.
 export const SANDBOX_MOUNTS = fromEnv('SANDBOX_MOUNTS') || '';
+
+// NUS Canvas LMS read-only sync. CANVAS_API_TOKEN is a secret (gitignored .env).
+// CANVAS_COURSES is an optional ';'-separated allowlist of course_code/id.
+export const CANVAS_BASE_URL = fromEnv('CANVAS_BASE_URL') || 'https://canvas.nus.edu.sg';
+export const CANVAS_API_TOKEN = fromEnv('CANVAS_API_TOKEN') || '';
+export const CANVAS_COURSES = fromEnv('CANVAS_COURSES') || '';
 
 // Telegram's cloud Bot API caps file downloads at 20 MB; larger files fail at
 // getFile(), so we detect and warn instead of attempting the download.
