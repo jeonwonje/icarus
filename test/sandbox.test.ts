@@ -1,6 +1,6 @@
 import path from 'path';
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 
 import { buildSandboxArgs } from '../src/sandbox.js';
 
@@ -68,5 +68,31 @@ describe('buildSandboxArgs', () => {
     expect(chdir).toBeGreaterThanOrEqual(0);
     expect(a[chdir + 1]).toBe(DATA);
     expect(a).toContain('--die-with-parent');
+  });
+});
+
+import { sandboxMode } from '../src/sandbox.js';
+
+describe('sandboxMode', () => {
+  const prev = process.env.AGENT_SANDBOX;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENT_SANDBOX;
+    else process.env.AGENT_SANDBOX = prev;
+  });
+
+  it('defaults to auto when unset', () => {
+    delete process.env.AGENT_SANDBOX;
+    expect(sandboxMode()).toBe('auto');
+  });
+
+  it('reads on/off/auto case-insensitively', () => {
+    process.env.AGENT_SANDBOX = 'ON';
+    expect(sandboxMode()).toBe('on');
+    process.env.AGENT_SANDBOX = '0';
+    expect(sandboxMode()).toBe('off');
+    process.env.AGENT_SANDBOX = '1';
+    expect(sandboxMode()).toBe('on');
+    process.env.AGENT_SANDBOX = 'off';
+    expect(sandboxMode()).toBe('off');
   });
 });
