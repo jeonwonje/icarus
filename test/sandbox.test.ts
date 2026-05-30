@@ -2,7 +2,7 @@ import path from 'path';
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { buildSandboxArgs, sandboxMode, shouldSandbox } from '../src/sandbox.js';
+import { buildSandboxArgs, sandboxMode, shouldSandbox, decideSandbox } from '../src/sandbox.js';
 
 const DATA = '/home/jeon/icarus/data';
 const HOME = '/home/jeon';
@@ -11,7 +11,7 @@ const HOME = '/home/jeon';
 function bindPairs(args: string[]): Array<[string, string]> {
   const pairs: Array<[string, string]> = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--bind') pairs.push([args[i + 1], args[i + 2]]);
+    if (args[i] === '--bind' || args[i] === '--bind-try') pairs.push([args[i + 1], args[i + 2]]);
   }
   return pairs;
 }
@@ -114,5 +114,35 @@ describe('shouldSandbox (off is deterministic)', () => {
 describe('buildSandboxArgs guards', () => {
   it('throws on a relative dataDir', () => {
     expect(() => buildSandboxArgs({ dataDir: 'data', rawTarget: null, home: '/home/jeon' })).toThrow();
+  });
+});
+
+describe('decideSandbox', () => {
+  const B = '/usr/bin/bwrap';
+  it('off mode: disabled, reason off, no error', () => {
+    expect(decideSandbox('off', 'linux', B)).toEqual({ enabled: false, bwrap: null, reason: 'off' });
+  });
+  it('on + linux + bwrap: enabled', () => {
+    expect(decideSandbox('on', 'linux', B)).toEqual({ enabled: true, bwrap: B, reason: 'enabled' });
+  });
+  it('on + bwrap missing: disabled with error', () => {
+    const d = decideSandbox('on', 'linux', null);
+    expect(d.enabled).toBe(false);
+    expect(d.reason).toBe('unavailable');
+    expect(d.error).toMatch(/bwrap not found/);
+  });
+  it('auto + bwrap missing: disabled, no error (silent fallback)', () => {
+    const d = decideSandbox('auto', 'linux', null);
+    expect(d.enabled).toBe(false);
+    expect(d.reason).toBe('unavailable');
+    expect(d.error).toBeUndefined();
+  });
+  it('auto + linux + bwrap: enabled', () => {
+    expect(decideSandbox('auto', 'linux', B)).toEqual({ enabled: true, bwrap: B, reason: 'enabled' });
+  });
+  it('non-linux platform: never sandboxed even if bwrap given', () => {
+    const d = decideSandbox('on', 'darwin', B);
+    expect(d.enabled).toBe(false);
+    expect(d.reason).toBe('unavailable');
   });
 });

@@ -30,7 +30,7 @@ export function buildSandboxArgs(opts: SandboxOpts): string[] {
     '--ro-bind', '/', '/',
     '--dev', '/dev',
     '--proc', '/proc',
-    '--bind', '/tmp', '/tmp',
+    '--tmpfs', '/tmp',
     '--bind', dataDir, dataDir,
   ];
 
@@ -38,8 +38,10 @@ export function buildSandboxArgs(opts: SandboxOpts): string[] {
     args.push('--bind', rawTarget, rawTarget);
   }
 
-  args.push('--bind', path.join(home, '.claude'), path.join(home, '.claude'));
-  args.push('--bind', path.join(home, '.claude.json'), path.join(home, '.claude.json'));
+  // Claude needs to write session transcripts and refresh credentials.
+  // --bind-try: skip silently if the source doesn't exist (fresh host).
+  args.push('--bind-try', path.join(home, '.claude'), path.join(home, '.claude'));
+  args.push('--bind-try', path.join(home, '.claude.json'), path.join(home, '.claude.json'));
 
   args.push('--chdir', dataDir, '--die-with-parent');
   return args;
@@ -92,12 +94,18 @@ export interface SandboxDecision {
   error?: string;
 }
 
-/** Decide whether to sandbox this spawn given mode + platform + bwrap. */
-export function shouldSandbox(): SandboxDecision {
-  const mode = sandboxMode();
+/**
+ * Pure decision given the three inputs. Exposed for testing the on/auto/
+ * unavailable branches without depending on the host's real PATH/platform.
+ */
+export function decideSandbox(
+  mode: SandboxMode,
+  platform: string,
+  bwrap: string | null,
+): SandboxDecision {
   if (mode === 'off') return { enabled: false, bwrap: null, reason: 'off' };
-  const bwrap = process.platform === 'linux' ? bwrapPath() : null;
-  if (!bwrap) {
+  const resolved = platform === 'linux' ? bwrap : null;
+  if (!resolved) {
     return {
       enabled: false,
       bwrap: null,
@@ -105,5 +113,10 @@ export function shouldSandbox(): SandboxDecision {
       error: mode === 'on' ? 'AGENT_SANDBOX=on but bwrap not found on PATH' : undefined,
     };
   }
-  return { enabled: true, bwrap, reason: 'enabled' };
+  return { enabled: true, bwrap: resolved, reason: 'enabled' };
+}
+
+/** Decide whether to sandbox this spawn given mode + platform + bwrap. */
+export function shouldSandbox(): SandboxDecision {
+  return decideSandbox(sandboxMode(), process.platform, bwrapPath());
 }
