@@ -65,5 +65,6 @@ npm test
 - Tracked under `data/`: `CLAUDE.md` and `skills/*.md`. Everything else under `data/` is gitignored — per-deployment content.
 - SQLite db lives in `state/`, separate from the wiki.
 - One Claude session, keyed `'life'`. The weekly-prune script reuses it.
-- Slash commands handled by the bot: `/whoami`, `/ping`, `/help`. Anything else is forwarded verbatim to the claude subprocess.
+- Slash commands handled by the bot: `/whoami`, `/ping`, `/help`, `/canvas`. Anything else is forwarded verbatim to the claude subprocess.
+- `/canvas` (and `scripts/canvas-sync.ts`) mirror NUS Canvas active-course files into `raw/canvas/<course>/`, **read-only** (chmod 0444 + a sandbox `--ro-bind` over `raw/canvas`). The sync runs in the bot process, not the agent, so `CANVAS_API_TOKEN` never reaches the sandboxed claude (it's also scrubbed from the agent's env). Config: `CANVAS_BASE_URL`, `CANVAS_API_TOKEN`, `CANVAS_COURSES`. Built in `src/canvas.ts`.
 - The per-turn `claude` subprocess runs inside a bubblewrap (`bwrap`) sandbox: the whole filesystem is read-only except `data/`, the resolved `raw/` target, and `~/.claude` state (plus a private, per-turn `/tmp` tmpfs). This is the FS wall that stops the agent editing its own source (`src/`). Toggle with `AGENT_SANDBOX` (`auto` default — on when `bwrap` is present on Linux; `on` to require it, erroring if missing; `off` to disable). Built in `src/sandbox.ts`, wired in `src/agent-runner.ts`. `SANDBOX_MOUNTS=name=path;…` adds read-write `raw/<name>` mounts (e.g. OneDrive) to the allowlist.
