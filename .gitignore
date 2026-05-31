@@ -1,27 +1,9 @@
+# Dev deps (reinstall with `npm install`)
 node_modules/
-dist/
 
-# Per-instance state (sqlite db, runtime artifacts)
-state/
-logs/
-
-# Mutable wiki/log/outbox content — only the persona and skills are tracked.
-data/wiki/
-data/outbox/
-data/index.md
-data/log.md
-# Source tree: normally a symlink to RAW_DIR (your Desktop); a real local dir
-# in the off-Windows fallback. Its contents are private, never tracked.
-data/raw
-
+# Secrets — live in ~/.bashrc, never in the repo or the hub
 .env
-
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
 
 .DS_Store
 .idea/
 .vscode/
-.tmp-*

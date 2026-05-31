@@ -5,6 +5,10 @@ A Claude Code **skill library** for a OneDrive life-hub.
 icarus used to be a Telegram bot. It's now just a set of Claude Code skills you
 run from inside your OneDrive — Claude Code itself is the interface.
 
+**Nothing runs as a service.** There's no daemon, no server, no background
+process — no `dist/`, no runtime `state/`, no MCP. You open `claude` in the hub
+and the skills are there. Syncing happens only when you ask.
+
 ## The hub
 
 Run `claude` inside your OneDrive. Claude reads `CLAUDE.md` (the persona) and
