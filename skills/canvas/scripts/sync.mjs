@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ── Canvas REST client (dependency-free: Node fs/path + global fetch) ──────────
 
@@ -280,10 +281,23 @@ async function main() {
     `Canvas: ${s.downloaded} new files, ${s.announcements} new announcements, ${s.skipped} unchanged, ${s.failed} failed across ${s.courses} courses · ${(s.bytes / 1e6).toFixed(1)} MB`,
   );
   for (const e of s.errors.slice(0, 10)) console.error(`  ✗ ${e}`);
-  if (s.failed > 0 && s.downloaded === 0 && s.announcements === 0) process.exit(1);
+  // Fail only when nothing at all came through — no downloads, no announcements,
+  // and nothing even skipped-as-unchanged. A nonzero `skipped` proves Canvas was
+  // reachable and the sync is healthy, so persistent per-course 403s (e.g. courses
+  // that lock the files API) don't flag an otherwise-good run as failed.
+  if (s.failed > 0 && s.downloaded === 0 && s.announcements === 0 && s.skipped === 0) process.exit(1);
 }
 
-// Run only when executed directly (not when imported by tests).
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+// Run only when executed directly (not when imported by tests). Resolve symlinks
+// on both sides: `.claude/skills` may be a symlink, so argv[1] (symlink path) and
+// import.meta.url (real path) differ unless both are passed through realpath.
+function realPath(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+if (process.argv[1] && realPath(process.argv[1]) === realPath(fileURLToPath(import.meta.url))) {
   main();
 }
