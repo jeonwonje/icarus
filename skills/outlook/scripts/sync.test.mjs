@@ -40,7 +40,10 @@ describe('isInternal / isBulk', () => {
     expect(isBulk({ 'list-id': '<x>' })).toBe(true);
     expect(isBulk({ precedence: 'bulk' })).toBe(true);
     expect(isBulk({ from: 'no-reply@news.com' })).toBe(true);
+    expect(isBulk({ from: 'noreply-nusfastpay@nus.edu.sg' })).toBe(true); // prefix, real NUS sender
+    expect(isBulk({ from: 'DoNotReply.billing@x.com' })).toBe(true);
     expect(isBulk({ from: 'prof@nus.edu.sg' })).toBe(false);
+    expect(isBulk({ from: 'norbert@nus.edu.sg' })).toBe(false); // \b guard: not a no-reply
   });
 });
 

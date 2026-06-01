@@ -32,7 +32,9 @@ export function isInternal(from) {
   return /nus\.edu/i.test(from || '');
 }
 
-const BULK_FROM_RE = /^(no-?reply|do-?not-?reply|mailer-daemon|bounce|notifications?)@/i;
+// Match the local-part PREFIX, not requiring an immediate `@`, so real-world
+// senders like `noreply-nusfastpay@…` / `no-reply.billing@…` are caught too.
+const BULK_FROM_RE = /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|bounce|notifications?)\b/i;
 export function isBulk(headers) {
   if (headers['list-id'] || headers['list-unsubscribe']) return true;
   const prec = (headers['precedence'] || '').toLowerCase();
