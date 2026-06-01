@@ -198,6 +198,30 @@ export function walkEmlFiles(dir) {
   return out;
 }
 
+async function ensureReadpst() {
+  try { await execFileP('readpst', ['-V']); }
+  catch { console.error('readpst not found — install libpst (e.g. sudo apt install libpst).'); process.exit(1); }
+}
+
+async function main() {
+  const hubDir = resolveHubDir(process.argv[2]);
+  const pstPath = process.env.OUTLOOK_PST_PATH || newestPst(hubDir);
+  if (!pstPath) { console.error('No .pst found in hub (set OUTLOOK_PST_PATH).'); process.exit(1); }
+  await ensureReadpst();
+  const selfAddrs = (process.env.OUTLOOK_SELF || deriveSelf(pstPath))
+    .split(',').map((s) => s.trim()).filter(Boolean);
+  console.error(`outlook sync → ${path.join(hubDir, 'email')} (pst: ${path.basename(pstPath)})`);
+  const s = await syncOutlook({ hubDir, pstPath, selfAddrs });
+  console.log(`Outlook: ${s.messages} new messages, ${s.attachments} attachments, ${s.skipped} unchanged, ${s.failed} failed · ${(s.bytes / 1e6).toFixed(1)} MB · ${s.triaged} triage candidates`);
+  for (const e of s.errors.slice(0, 10)) console.error(`  ✗ ${e}`);
+  if (s.messages === 0 && s.skipped === 0 && s.failed > 0) process.exit(1);
+}
+
+function realPath(p) { try { return fs.realpathSync(p); } catch { return path.resolve(p); } }
+if (process.argv[1] && realPath(process.argv[1]) === realPath(fileURLToPath(import.meta.url))) {
+  main();
+}
+
 export async function syncOutlook(opts) {
   const { hubDir, pstPath, selfAddrs, windowMs = FORTY_DAYS, now = Date.now(), convert = defaultConvert } = opts;
   const emailDir = path.join(hubDir, 'email');
