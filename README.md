@@ -30,6 +30,15 @@ subject:
 `user/` is where work happens. Add other domains (`personal/`, `finance/`, …)
 freely.
 
+In practice, open the hub with the `work` alias (in `~/.bashrc`):
+
+```bash
+alias work='(cd "/mnt/c/Users/<you>/OneDrive - National University of Singapore" && claude --remote-control)'
+```
+
+Typing `work` drops you into the hub with Remote Control on, where `/canvas`,
+`/outlook`, and the other skills are available.
+
 ## Skills
 
 This repo is the skill library. Each data source is a folder:
@@ -61,6 +70,21 @@ Mirrors NUS Canvas course files + announcements into
   default `https://canvas.nus.edu.sg`; optional `CANVAS_COURSES` allowlist).
 - In the hub: say "sync my canvas" or `/canvas`. Or run directly:
   `node skills/canvas/scripts/sync.mjs [hubDir]`.
+
+### outlook
+
+Ingests the daily NUS Outlook `.pst` export (a full-mailbox snapshot at the hub
+root) into a read-only `email/` mirror: year-bucketed message notes +
+hash-deduped attachments under `email/attachments/`. Dedups by `Message-ID` via
+`email/.email-manifest.json`, so old threads are stored once. Emits
+`email/.triage.json`; when you run `/outlook`, Claude reads it and curates an
+`## Inbox` section in `index.md` (bulk/newsletter mail is filtered out first).
+
+- Needs `readpst` (libpst: `sudo apt install libpst`) and a `.pst` in the hub
+  root (override with `OUTLOOK_PST_PATH`; self address via `OUTLOOK_SELF`).
+- First run silently archives the whole backlog and triages the last 40 days;
+  later runs triage only new mail.
+- Invoke with `/outlook` or "check my email".
 
 ## Adding a data source
 
