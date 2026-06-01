@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadManifest, shouldTriage, writeReadOnly, storeAttachment } from './sync.mjs';
+import { resolveHubDir, newestPst, deriveSelf } from './sync.mjs';
 
 describe('sanitizeName', () => {
   it('strips separators and control chars, never returns . or ..', () => {
@@ -131,6 +132,28 @@ describe('writeReadOnly + storeAttachment', () => {
     const n2 = await storeAttachment(dir, { ...a, filename: 'other.pdf' });
     expect(n1).toBe(n2); // identical bytes → one file
     expect(n1.endsWith('.pdf')).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('resolveHubDir', () => {
+  it('walks up to a dir containing CLAUDE.md', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-'));
+    fs.writeFileSync(path.join(root, 'CLAUDE.md'), '#');
+    const deep = path.join(root, 'a', 'b');
+    fs.mkdirSync(deep, { recursive: true });
+    expect(resolveHubDir(undefined, deep)).toBe(fs.realpathSync(root));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('newestPst / deriveSelf', () => {
+  it('picks the .pst and derives the self address from its name', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pst-'));
+    const p = path.join(dir, 'me@u.nus.edu.pst');
+    fs.writeFileSync(p, 'x');
+    expect(newestPst(dir)).toBe(p);
+    expect(deriveSelf(p)).toBe('me@u.nus.edu');
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

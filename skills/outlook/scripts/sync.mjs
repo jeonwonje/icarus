@@ -157,3 +157,27 @@ export async function storeAttachment(attachDir, att) {
   if (!fs.existsSync(dest)) await writeReadOnly(dest, att.bytes);
   return name;
 }
+
+export function resolveHubDir(arg, cwd = process.cwd()) {
+  if (arg) return path.resolve(arg);
+  let dir = path.resolve(cwd);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.claude')) || fs.existsSync(path.join(dir, 'CLAUDE.md'))) return fs.realpathSync(dir);
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.resolve(cwd);
+}
+
+export function newestPst(hubDir) {
+  const files = fs.readdirSync(hubDir).filter((f) => f.toLowerCase().endsWith('.pst'));
+  if (!files.length) return null;
+  return files.map((f) => path.join(hubDir, f))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+}
+
+export function deriveSelf(pstPath) {
+  const base = path.basename(pstPath).replace(/\.pst$/i, '');
+  return /@/.test(base) ? base : '';
+}
