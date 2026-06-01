@@ -119,3 +119,41 @@ export function renderMessageMarkdown(msg, attachmentRefs, links, signals) {
     '',
   ].join('\n');
 }
+
+const READ_ONLY = 0o444;
+const OWNER_WRITE = 0o644;
+
+export function loadManifest(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf-8')); }
+  catch { return { baseline: null, lastRun: null, messages: {} }; }
+}
+
+export function shouldTriage(msg, signals, manifest, windowMs, now) {
+  if (signals.bulk) return false;
+  const t = msg.date ? Date.parse(msg.date) : NaN;
+  if (isNaN(t)) return false;
+  const cutoff = manifest.baseline == null
+    ? now - windowMs
+    : Date.parse(manifest.lastRun || manifest.baseline);
+  return t >= cutoff;
+}
+
+export async function writeReadOnly(dest, buf) {
+  if (fs.existsSync(dest)) await fs.promises.chmod(dest, OWNER_WRITE);
+  await fs.promises.writeFile(dest, buf);
+  await fs.promises.chmod(dest, READ_ONLY);
+}
+
+function guessExt(contentType) {
+  const map = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg', 'text/calendar': '.ics' };
+  return map[(contentType || '').toLowerCase()] || '.bin';
+}
+
+export async function storeAttachment(attachDir, att) {
+  const hash = sha256(att.bytes);
+  const ext = (path.extname(att.filename || '') || guessExt(att.contentType)).toLowerCase();
+  const name = `${hash}${ext}`;
+  const dest = path.join(attachDir, name);
+  if (!fs.existsSync(dest)) await writeReadOnly(dest, att.bytes);
+  return name;
+}

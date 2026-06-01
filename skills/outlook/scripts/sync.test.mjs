@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { sanitizeName, slug } from './sync.mjs';
 import { parseAddress, addressList, isInternal, isBulk, deadlineHit, extractLinks, classifySignals } from './sync.mjs';
 import { sha256, toIso, normalizeMessage, messageRelPath, renderMessageMarkdown } from './sync.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { loadManifest, shouldTriage, writeReadOnly, storeAttachment } from './sync.mjs';
 
 describe('sanitizeName', () => {
   it('strips separators and control chars, never returns . or ..', () => {
@@ -89,5 +93,44 @@ describe('renderMessageMarkdown', () => {
     expect(md).toContain('attachments: ["deadbeef.pdf"]');
     expect(md).toContain('subject: "Hi"');
     expect(md.trimEnd().endsWith('body')).toBe(true);
+  });
+});
+
+const DAY = 86400000;
+
+describe('loadManifest', () => {
+  it('returns an empty manifest on missing file', () => {
+    expect(loadManifest('/no/such/file.json')).toEqual({ baseline: null, lastRun: null, messages: {} });
+  });
+});
+
+describe('shouldTriage', () => {
+  const now = Date.parse('2026-06-02T00:00:00Z');
+  const mk = (iso) => ({ date: iso });
+  it('first run: triages last 40 days, drops bulk and older', () => {
+    const fresh = { baseline: null, lastRun: null, messages: {} };
+    expect(shouldTriage(mk('2026-05-20T00:00:00Z'), { bulk: false }, fresh, 40 * DAY, now)).toBe(true);
+    expect(shouldTriage(mk('2026-01-01T00:00:00Z'), { bulk: false }, fresh, 40 * DAY, now)).toBe(false);
+    expect(shouldTriage(mk('2026-05-20T00:00:00Z'), { bulk: true }, fresh, 40 * DAY, now)).toBe(false);
+  });
+  it('later run: triages only mail after lastRun', () => {
+    const man = { baseline: '2026-04-01T00:00:00Z', lastRun: '2026-06-01T00:00:00Z', messages: {} };
+    expect(shouldTriage(mk('2026-06-01T12:00:00Z'), { bulk: false }, man, 40 * DAY, now)).toBe(true);
+    expect(shouldTriage(mk('2026-05-30T00:00:00Z'), { bulk: false }, man, 40 * DAY, now)).toBe(false);
+  });
+});
+
+describe('writeReadOnly + storeAttachment', () => {
+  it('writes 0444 and dedups identical bytes by hash', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'outlook-test-'));
+    const f = path.join(dir, 'x.txt');
+    await writeReadOnly(f, Buffer.from('hi'));
+    expect(fs.statSync(f).mode & 0o222).toBe(0); // no write bits
+    const a = { filename: 'doc.pdf', bytes: Buffer.from('SAME'), contentType: 'application/pdf' };
+    const n1 = await storeAttachment(dir, a);
+    const n2 = await storeAttachment(dir, { ...a, filename: 'other.pdf' });
+    expect(n1).toBe(n2); // identical bytes → one file
+    expect(n1.endsWith('.pdf')).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
