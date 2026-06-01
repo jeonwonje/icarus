@@ -181,3 +181,72 @@ export function deriveSelf(pstPath) {
   const base = path.basename(pstPath).replace(/\.pst$/i, '');
   return /@/.test(base) ? base : '';
 }
+
+const FORTY_DAYS = 40 * 86400000;
+
+async function defaultConvert(pstPath, outDir) {
+  await execFileP('readpst', ['-e', '-q', '-o', outDir, pstPath], { maxBuffer: 256 * 1024 * 1024 });
+}
+
+export function walkEmlFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkEmlFiles(full));
+    else if (/\.eml$/i.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+export async function syncOutlook(opts) {
+  const { hubDir, pstPath, selfAddrs, windowMs = FORTY_DAYS, now = Date.now(), convert = defaultConvert } = opts;
+  const emailDir = path.join(hubDir, 'email');
+  const attachDir = path.join(emailDir, 'attachments');
+  fs.mkdirSync(attachDir, { recursive: true });
+  const manifestPath = path.join(emailDir, '.email-manifest.json');
+  const manifest = loadManifest(manifestPath);
+  const firstRun = manifest.baseline == null;
+  const summary = { messages: 0, attachments: 0, skipped: 0, failed: 0, bytes: 0, triaged: 0, errors: [] };
+  const triage = [];
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'outlook-'));
+  try {
+    await convert(pstPath, tmp);
+    for (const eml of walkEmlFiles(tmp)) {
+      try {
+        const msg = normalizeMessage(parseEml(fs.readFileSync(eml)));
+        if (manifest.messages[msg.messageId]) { summary.skipped++; continue; }
+        const signals = classifySignals(msg, selfAddrs);
+        const links = extractLinks(msg.text);
+        const refs = [];
+        for (const att of msg.attachments) {
+          try {
+            const name = await storeAttachment(attachDir, att);
+            if (!refs.includes(name)) refs.push(name);
+            summary.attachments++;
+            summary.bytes += att.bytes.length;
+          } catch (e) { summary.failed++; summary.errors.push(`attach ${att.filename}: ${e.message}`); }
+        }
+        const rel = messageRelPath(msg);
+        const dest = path.join(emailDir, rel);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        await writeReadOnly(dest, Buffer.from(renderMessageMarkdown(msg, refs, links, signals), 'utf-8'));
+        manifest.messages[msg.messageId] = { date: msg.date, path: rel, attachments: refs };
+        summary.messages++;
+        if (shouldTriage(msg, signals, manifest, windowMs, now)) {
+          triage.push({ messageId: msg.messageId, date: msg.date,
+            from: decodeWord(msg.headers['from'] || ''), subject: msg.subject, path: rel, signals });
+          summary.triaged++;
+        }
+      } catch (e) { summary.failed++; summary.errors.push(`${path.basename(eml)}: ${e.message}`); }
+    }
+    if (firstRun) manifest.baseline = new Date(now).toISOString();
+    manifest.lastRun = new Date(now).toISOString();
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    fs.writeFileSync(path.join(emailDir, '.triage.json'),
+      JSON.stringify({ generated: manifest.lastRun, firstRun, candidates: triage }, null, 2));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  return summary;
+}

@@ -157,3 +157,55 @@ describe('newestPst / deriveSelf', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+import { syncOutlook } from './sync.mjs';
+
+// A fake converter that drops two .eml files into the temp dir readpst would fill.
+function fakeConvert(eml1, eml2) {
+  return async (_pstPath, outDir) => {
+    fs.writeFileSync(path.join(outDir, '1.eml'), eml1);
+    fs.mkdirSync(path.join(outDir, 'Inbox'), { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'Inbox', '2.eml'), eml2);
+  };
+}
+
+describe('syncOutlook', () => {
+  const now = Date.parse('2026-06-02T00:00:00Z');
+  const recent = 'Message-ID: <a@x>\r\nDate: Mon, 01 Jun 2026 09:00:00 +0800\r\nFrom: prof@nus.edu.sg\r\nTo: me@u.nus.edu\r\nSubject: Submission deadline\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nplease submit by friday';
+  const bulk = 'Message-ID: <b@x>\r\nDate: Mon, 01 Jun 2026 09:00:00 +0800\r\nFrom: no-reply@news.com\r\nList-Id: <n>\r\nTo: me@u.nus.edu\r\nSubject: Weekly news\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello';
+
+  it('first run: stores both, triages the direct one, not the bulk one', async () => {
+    const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-'));
+    const s = await syncOutlook({ hubDir: hub, pstPath: '/x.pst', selfAddrs: ['me@u.nus.edu'],
+      now, convert: fakeConvert(recent, bulk) });
+    expect(s.messages).toBe(2);
+    expect(s.triaged).toBe(1);
+    const triage = JSON.parse(fs.readFileSync(path.join(hub, 'email', '.triage.json'), 'utf-8'));
+    expect(triage.candidates).toHaveLength(1);
+    expect(triage.candidates[0].subject).toBe('Submission deadline');
+    const man = JSON.parse(fs.readFileSync(path.join(hub, 'email', '.email-manifest.json'), 'utf-8'));
+    expect(man.baseline).not.toBeNull();
+    expect(Object.keys(man.messages)).toHaveLength(2);
+    expect(fs.existsSync(path.join(hub, 'email', '2026'))).toBe(true);
+    fs.rmSync(hub, { recursive: true, force: true });
+  });
+
+  it('second run: re-seen Message-IDs are skipped, not re-written', async () => {
+    const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-'));
+    await syncOutlook({ hubDir: hub, pstPath: '/x.pst', selfAddrs: ['me@u.nus.edu'], now, convert: fakeConvert(recent, bulk) });
+    const s2 = await syncOutlook({ hubDir: hub, pstPath: '/x.pst', selfAddrs: ['me@u.nus.edu'],
+      now: now + 86400000, convert: fakeConvert(recent, bulk) });
+    expect(s2.messages).toBe(0);
+    expect(s2.skipped).toBe(2);
+    fs.rmSync(hub, { recursive: true, force: true });
+  });
+
+  it('always removes the temp dir', async () => {
+    const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-'));
+    let captured;
+    await syncOutlook({ hubDir: hub, pstPath: '/x.pst', selfAddrs: ['me@u.nus.edu'], now,
+      convert: async (_p, outDir) => { captured = outDir; fs.writeFileSync(path.join(outDir, '1.eml'), recent); } });
+    expect(fs.existsSync(captured)).toBe(false);
+    fs.rmSync(hub, { recursive: true, force: true });
+  });
+});
