@@ -66,3 +66,84 @@ export function parseContentType(value) {
   }
   return { type: typePart.trim().toLowerCase(), params };
 }
+
+// htmlToText (copied from canvas) ───────────────────────────────────────────
+export function htmlToText(html) {
+  return (html ?? '')
+    .replace(/<\s*(br|\/p|\/div|\/li|\/h[1-6])\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+export function decodeTransfer(bodyBuf, encoding) {
+  const enc = (encoding || '7bit').toLowerCase();
+  if (enc === 'base64') {
+    return Buffer.from(bodyBuf.toString('ascii').replace(/[^A-Za-z0-9+/=]/g, ''), 'base64');
+  }
+  if (enc === 'quoted-printable') {
+    const t = bodyBuf.toString('binary')
+      .replace(/=\r?\n/g, '')
+      .replace(/=([0-9A-Fa-f]{2})/g, (_m, h) => String.fromCharCode(parseInt(h, 16)));
+    return Buffer.from(t, 'binary');
+  }
+  return bodyBuf;
+}
+
+export function extractFilename(disp) {
+  if (!disp) return '';
+  const m = String(disp).match(/filename\*?=("?)([^";]+)\1/i);
+  return m ? m[2] : '';
+}
+
+export function splitMultipart(buf, boundary) {
+  const delim = Buffer.from('--' + boundary);
+  const positions = [];
+  let idx = buf.indexOf(delim, 0);
+  while (idx !== -1) { positions.push(idx); idx = buf.indexOf(delim, idx + delim.length); }
+  const parts = [];
+  for (let i = 0; i < positions.length - 1; i++) {
+    let s = positions[i] + delim.length;
+    if (buf[s] === 0x2d && buf[s + 1] === 0x2d) break; // closing "--boundary--"
+    while (s < buf.length && (buf[s] === 0x0d || buf[s] === 0x0a)) s++;
+    let end = positions[i + 1];
+    if (buf[end - 1] === 0x0a) end--;
+    if (buf[end - 1] === 0x0d) end--;
+    parts.push(buf.slice(s, end));
+  }
+  return parts;
+}
+
+export function parseEml(buf) {
+  const { header, body } = splitHeaderBody(buf);
+  const headers = parseHeaders(header);
+  const result = { headers, text: '', html: '', attachments: [] };
+  walkPart(headers, body, result);
+  if (!result.text && result.html) result.text = htmlToText(result.html);
+  return result;
+}
+
+function walkPart(headers, bodyBuf, result) {
+  const ct = parseContentType(headers['content-type']);
+  if (ct.type.startsWith('multipart/')) {
+    if (!ct.params.boundary) return;
+    for (const part of splitMultipart(bodyBuf, ct.params.boundary)) {
+      const { header, body } = splitHeaderBody(part);
+      walkPart(parseHeaders(header), body, result);
+    }
+    return;
+  }
+  const disp = (headers['content-disposition'] || '').toLowerCase();
+  const filename = ct.params.name || extractFilename(headers['content-disposition']);
+  const decoded = decodeTransfer(bodyBuf, headers['content-transfer-encoding']);
+  if (disp.startsWith('attachment') || (filename && !ct.type.startsWith('text/'))) {
+    result.attachments.push({ filename: decodeWord(filename || 'attachment'), bytes: decoded, contentType: ct.type });
+  } else if (ct.type === 'text/plain') {
+    result.text += decodeBytes(decoded, ct.params.charset);
+  } else if (ct.type === 'text/html') {
+    result.html += decodeBytes(decoded, ct.params.charset);
+  } else if (filename) {
+    result.attachments.push({ filename: decodeWord(filename), bytes: decoded, contentType: ct.type });
+  }
+}

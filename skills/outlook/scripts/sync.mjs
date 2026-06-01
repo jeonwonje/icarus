@@ -17,6 +17,6 @@ export function sanitizeName(name) {
 }
 
 export function slug(s) {
-  const out = sanitizeName(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  const out = (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   return out || 'untitled';
 }

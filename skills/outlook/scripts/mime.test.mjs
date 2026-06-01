@@ -40,3 +40,59 @@ describe('parseContentType', () => {
     expect(ct.params.boundary).toBe('==abc==');
   });
 });
+import { decodeTransfer, splitMultipart, extractFilename, parseEml, htmlToText } from './mime.mjs';
+
+describe('decodeTransfer', () => {
+  it('decodes base64 and quoted-printable', () => {
+    expect(decodeTransfer(Buffer.from('SGk='), 'base64').toString()).toBe('Hi');
+    expect(decodeTransfer(Buffer.from('a=3Db'), 'quoted-printable').toString()).toBe('a=b');
+    expect(decodeTransfer(Buffer.from('raw'), '7bit').toString()).toBe('raw');
+  });
+});
+
+describe('extractFilename', () => {
+  it('pulls filename from content-disposition', () => {
+    expect(extractFilename('attachment; filename="notes.pdf"')).toBe('notes.pdf');
+  });
+});
+
+describe('htmlToText', () => {
+  it('strips tags and decodes entities', () => {
+    expect(htmlToText('<p>Hi&amp;bye</p>')).toBe('Hi&bye');
+  });
+});
+
+describe('parseEml', () => {
+  it('parses a plain text email', () => {
+    const eml = 'Subject: =?UTF-8?B?SGk=?=\r\nFrom: a@b.com\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nbody line';
+    const m = parseEml(Buffer.from(eml));
+    expect(m.headers.subject).toBe('=?UTF-8?B?SGk=?='); // raw header kept; decode at use-site
+    expect(m.text.trim()).toBe('body line');
+  });
+
+  it('walks multipart/mixed: text part + base64 attachment', () => {
+    const b = 'BOUNDARY1';
+    const eml = [
+      'Content-Type: multipart/mixed; boundary="' + b + '"', '',
+      '--' + b,
+      'Content-Type: text/plain; charset=utf-8', '',
+      'hello world', '',
+      '--' + b,
+      'Content-Type: application/pdf; name="x.pdf"',
+      'Content-Disposition: attachment; filename="x.pdf"',
+      'Content-Transfer-Encoding: base64', '',
+      Buffer.from('PDFBYTES').toString('base64'), '',
+      '--' + b + '--', '',
+    ].join('\r\n');
+    const m = parseEml(Buffer.from(eml));
+    expect(m.text.trim()).toBe('hello world');
+    expect(m.attachments).toHaveLength(1);
+    expect(m.attachments[0].filename).toBe('x.pdf');
+    expect(m.attachments[0].bytes.toString()).toBe('PDFBYTES');
+  });
+
+  it('falls back to html→text when no text/plain', () => {
+    const eml = 'Content-Type: text/html; charset=utf-8\r\n\r\n<p>Hi there</p>';
+    expect(parseEml(Buffer.from(eml)).text.trim()).toBe('Hi there');
+  });
+});
