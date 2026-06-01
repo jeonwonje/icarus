@@ -86,6 +86,12 @@ describe('normalizeMessage / messageRelPath', () => {
     const m = normalizeMessage({ headers: { from: 'a@b', subject: 's', date: '' }, text: '', attachments: [] });
     expect(m.messageId).toMatch(/^gen-[0-9a-f]{24}$/);
   });
+  it('gen-id distinguishes distinct bodies sharing from/date/subject', () => {
+    const base = { headers: { from: 'a@b', subject: 's', date: '' }, attachments: [] };
+    const a = normalizeMessage({ ...base, text: 'first body' });
+    const b = normalizeMessage({ ...base, text: 'second body' });
+    expect(a.messageId).not.toBe(b.messageId);
+  });
 });
 
 describe('renderMessageMarkdown', () => {

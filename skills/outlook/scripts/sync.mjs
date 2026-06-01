@@ -85,7 +85,11 @@ export function toIso(d) {
 export function normalizeMessage(parsed) {
   const h = parsed.headers;
   const rawId = (h['message-id'] || '').replace(/^<|>$/g, '').trim();
-  const messageId = rawId || 'gen-' + sha256(`${h['from'] || ''}|${h['date'] || ''}|${h['subject'] || ''}`).slice(0, 24);
+  // Fallback id for the rare message lacking a Message-ID. Include the body so two
+  // genuinely-distinct mails that share From/Date/Subject don't collide (and get one
+  // silently dropped as a "duplicate"); identical bodies are true dupes, safe to merge.
+  const messageId = rawId
+    || 'gen-' + sha256(`${h['from'] || ''}|${h['date'] || ''}|${h['subject'] || ''}|${parsed.text || ''}`).slice(0, 24);
   return {
     headers: h,
     messageId,
@@ -268,6 +272,9 @@ export async function syncOutlook(opts) {
     }
     if (firstRun) manifest.baseline = new Date(now).toISOString();
     manifest.lastRun = new Date(now).toISOString();
+    // Deliberate all-or-nothing commit: the manifest is persisted once at the end,
+    // not per-message. A mid-run crash re-converts/re-parses next time, which is safe
+    // because attachment writes are content-hash idempotent and notes are overwritten.
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     fs.writeFileSync(path.join(emailDir, '.triage.json'),
       JSON.stringify({ generated: manifest.lastRun, firstRun, candidates: triage }, null, 2));
