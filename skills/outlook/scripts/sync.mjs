@@ -69,3 +69,53 @@ export function classifySignals(msg, selfAddrs) {
     thread: (msg.headers['references'] || '').split(/\s+/).filter(Boolean)[0] || msg.headers['in-reply-to'] || msg.messageId,
   };
 }
+
+export function sha256(input) {
+  return createHash('sha256').update(input).digest('hex');
+}
+
+export function toIso(d) {
+  if (!d) return '';
+  const t = new Date(d);
+  return isNaN(t.getTime()) ? '' : t.toISOString();
+}
+
+export function normalizeMessage(parsed) {
+  const h = parsed.headers;
+  const rawId = (h['message-id'] || '').replace(/^<|>$/g, '').trim();
+  const messageId = rawId || 'gen-' + sha256(`${h['from'] || ''}|${h['date'] || ''}|${h['subject'] || ''}`).slice(0, 24);
+  return {
+    headers: h,
+    messageId,
+    date: toIso(h['date']),
+    subject: decodeWord(h['subject'] || '').trim(),
+    text: parsed.text || '',
+    attachments: parsed.attachments || [],
+  };
+}
+
+export function messageRelPath(msg) {
+  const date = (msg.date || '').slice(0, 10) || 'undated';
+  const year = date.slice(0, 4) || 'undated';
+  const h = sha256(msg.messageId).slice(0, 8);
+  return `${year}/${date}-${slug(msg.subject || 'no-subject')}-${h}.md`;
+}
+
+export function renderMessageMarkdown(msg, attachmentRefs, links, signals) {
+  return [
+    '---',
+    `message-id: ${JSON.stringify(msg.messageId)}`,
+    `date: ${msg.date || 'unknown'}`,
+    `from: ${JSON.stringify(decodeWord(msg.headers['from'] || ''))}`,
+    `to: ${JSON.stringify(addressList(msg.headers['to']))}`,
+    `cc: ${JSON.stringify(addressList(msg.headers['cc']))}`,
+    `subject: ${JSON.stringify(msg.subject)}`,
+    `attachments: ${JSON.stringify(attachmentRefs)}`,
+    `links: ${JSON.stringify(links)}`,
+    `signals: ${JSON.stringify(signals)}`,
+    '---',
+    '',
+    (msg.text || '').trim(),
+    '',
+  ].join('\n');
+}

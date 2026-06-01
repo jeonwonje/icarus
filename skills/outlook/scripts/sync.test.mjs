@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { sanitizeName, slug } from './sync.mjs';
 import { parseAddress, addressList, isInternal, isBulk, deadlineHit, extractLinks, classifySignals } from './sync.mjs';
+import { sha256, toIso, normalizeMessage, messageRelPath, renderMessageMarkdown } from './sync.mjs';
 
 describe('sanitizeName', () => {
   it('strips separators and control chars, never returns . or ..', () => {
@@ -60,5 +61,33 @@ describe('classifySignals', () => {
     const msg = { headers: { to: 'list@x.com', from: 'no-reply@x.com', 'list-id': '<n>' },
       subject: 'Weekly', text: '', attachments: [], messageId: 'm2' };
     expect(classifySignals(msg, self).bulk).toBe(true);
+  });
+});
+
+describe('normalizeMessage / messageRelPath', () => {
+  it('normalizes headers, decodes subject, falls back on missing id', () => {
+    const parsed = { headers: { 'message-id': '<abc@x>', date: 'Mon, 01 Jun 2026 09:12:00 +0800',
+      subject: '=?UTF-8?B?SGk=?=', from: 'a@b.com' }, text: 'hi', html: '', attachments: [] };
+    const m = normalizeMessage(parsed);
+    expect(m.messageId).toBe('abc@x');
+    expect(m.subject).toBe('Hi');
+    expect(m.date).toBe('2026-06-01T01:12:00.000Z');
+    expect(messageRelPath(m)).toMatch(/^2026\/2026-06-01-hi-[0-9a-f]{8}\.md$/);
+  });
+  it('generates an id when Message-ID is absent', () => {
+    const m = normalizeMessage({ headers: { from: 'a@b', subject: 's', date: '' }, text: '', attachments: [] });
+    expect(m.messageId).toMatch(/^gen-[0-9a-f]{24}$/);
+  });
+});
+
+describe('renderMessageMarkdown', () => {
+  it('emits frontmatter + body', () => {
+    const m = { messageId: 'abc@x', date: '2026-06-01T01:12:00.000Z',
+      headers: { from: 'a@b.com', to: 'me@u.nus.edu', cc: '' }, subject: 'Hi', text: 'body' };
+    const md = renderMessageMarkdown(m, ['deadbeef.pdf'], ['https://x'], { direct: true });
+    expect(md).toContain('message-id: "abc@x"');
+    expect(md).toContain('attachments: ["deadbeef.pdf"]');
+    expect(md).toContain('subject: "Hi"');
+    expect(md.trimEnd().endsWith('body')).toBe(true);
   });
 });
