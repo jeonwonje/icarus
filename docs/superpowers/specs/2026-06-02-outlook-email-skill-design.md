@@ -41,11 +41,13 @@ Invocation: `/outlook`, or auto-trigger on "check/sync my email".
    `.claude`/`CLAUDE.md`, else cwd).
 2. **Locate the `.pst`**: `OUTLOOK_PST_PATH` env if set, else the newest
    `<hub>/*.pst`. Error + non-zero exit if none found.
-3. **Convert**: `readpst -S -o <tmp>` where `<tmp>` is a `mktemp -d` **outside
-   OneDrive**. `-S` ("separate") writes one file per message with attachments
-   extracted as sibling files, so MIME/base64 decoding is offloaded to readpst.
-   The exact flag set is confirmed against the real `.pst` during implementation
-   (live verification step); `-S` is the design intent.
+3. **Convert**: `readpst -e -o <tmp>` where `<tmp>` is a `mktemp -d` **outside
+   OneDrive**. `-e` writes one self-contained RFC822 `.eml` file per message
+   (attachments inline as MIME) in a folder tree mirroring the mailbox. A pure
+   `parseEml(buffer)` then does header + MIME decoding in `.mjs`, which keeps the
+   parser fully unit-testable from hand-written `.eml` fixtures (no `readpst` in
+   tests). The exact flags are confirmed against the real `.pst` during the live
+   verification step.
 4. **Walk** the temp tree. For each message file, parse headers: `Message-ID`,
    `From`, `To`, `Cc`, `Date`, `Subject`, `List-Id`, `Precedence`,
    `In-Reply-To`/`References`; and the readable body.
@@ -109,7 +111,7 @@ and hash-dedup is what controls footprint.
 - **First run** (empty manifest): ingest + store + hash-dedup the **entire**
   mailbox, mark every `Message-ID` seen, set `baseline = now`. This is a silent
   archive — it does **not** flood the index. **Additionally**, emit triage
-  candidates for messages dated within the **last 14 days** so the operator
+  candidates for messages dated within the **last 40 days** so the operator
   starts with recent context.
 - **Later runs**: triage only messages dated after `lastRun` (older mail is
   already in the manifest and skipped anyway). `baseline` is set once.
@@ -169,7 +171,7 @@ Pure helpers, tested with injected fixtures; the `readpst` shell-out is injected
 - `classifySignals` / `isBulk` / `deadlineHit` / `isInternal`,
 - attachment hashing + content-dedup (same bytes → one file),
 - manifest dedup (seen `Message-ID` skipped) + incremental persistence,
-- baseline-window filtering (first-run 14-day triage; later-run `lastRun` cut),
+- baseline-window filtering (first-run 40-day triage; later-run `lastRun` cut),
 - `renderMessageMarkdown`, triage-candidate selection (bulk dropped).
 
 The full 4 GB `readpst` conversion is verified **live once** against the real
