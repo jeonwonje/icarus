@@ -48,6 +48,13 @@ commitment) into `<hub>/index.md` under `## Telegram` — one line per chat, ded
 against existing entries. Routine chatter stays in the per-chat digest.
 
 After digesting a chat, set `lastDigestedId` for that dialog in
-`<archive>/.telegram-manifest.json` to its highest delta record id, so the next
-run's delta starts clean. Keep digests tight — they are a curated surface, not a
-transcript.
+`<archive>/.telegram-manifest.json` to its highest delta record id, marking how
+far the digest has caught up. Keep digests tight — they are a curated surface,
+not a transcript.
+
+**Always run step 2 right after step 1.** `delta/latest.json` reflects only the
+most recent sync — re-running the ingester before digesting overwrites it, so any
+not-yet-digested records drop off the curated surface (they remain in
+`messages.jsonl`, recoverable via `lastDigestedId`, but are no longer flagged for
+you). The script does not read `lastDigestedId`; it is your marker, not a sync
+cursor.

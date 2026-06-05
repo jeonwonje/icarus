@@ -1,7 +1,6 @@
 // skills/telegram/scripts/sync.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const READ_ONLY = 0o444;
@@ -64,6 +63,8 @@ export function describeMedia(msg) {
   const m = msg.media;
   if (!m) return null;
   const cls = m.className || '';
+  // Photos report size via photo.sizes[]; we leave it 0 so the cap never skips a
+  // photo (Telegram already caps photo dimensions server-side). Documents carry size.
   if (cls.includes('Photo')) return { type: 'photo', size: Number(m.photo?.size ?? 0) };
   if (cls.includes('Document')) return { type: 'document', size: Number(m.document?.size ?? 0) };
   return { type: 'other', size: 0 };
@@ -220,6 +221,9 @@ export async function syncTelegram({ client, paths, opts }) {
       if (records[i].media?.path) summary.media += 1;
       if (records[i].media?.skipped) summary.skipped += 1;
     }
+    // Append then advance+persist the cursor. A crash in the one-line gap between
+    // appendFile and persist() can re-append this dialog's batch on the next run;
+    // digests dedup by message id, so it is cosmetic rather than corrupting.
     await appendArchive(paths.archiveRoot, entry.slug, records);
     updateCursor(entry, records);
     await persist();
