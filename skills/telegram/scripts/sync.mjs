@@ -148,3 +148,72 @@ export function buildDelta(chats, { bootstrap, digestDays, now }) {
   }
   return { generatedAt: now.toISOString(), bootstrap, chats: out };
 }
+
+/** Download one message's media to <chatDir>/media, honoring the size cap. */
+async function downloadMessageMedia(client, msg, record, chatDir, fileMaxMb) {
+  if (!record.media) return;
+  if (isOversize(record.media.size, fileMaxMb)) {
+    record.media = { type: record.media.type, skipped: 'oversize', size: record.media.size };
+    return;
+  }
+  const mediaDir = path.join(chatDir, 'media');
+  await fs.promises.mkdir(mediaDir, { recursive: true });
+  const buf = await client.downloadMedia(msg, {});
+  if (!buf) return;
+  const dest = path.join(mediaDir, `${msg.id}-${record.media.type}`);
+  await fs.promises.writeFile(dest, buf);
+  await fs.promises.chmod(dest, READ_ONLY).catch(() => {});
+  record.media = { type: record.media.type, path: path.relative(chatDir, dest), size: record.media.size };
+}
+
+/** Append records to a chat's messages.jsonl, creating the dir as needed. */
+async function appendArchive(archiveRoot, slug, records) {
+  const chatDir = path.join(archiveRoot, slug);
+  await fs.promises.mkdir(chatDir, { recursive: true });
+  const file = path.join(chatDir, 'messages.jsonl');
+  await fs.promises.appendFile(file, toJsonl(records));
+  return chatDir;
+}
+
+/**
+ * Full ETL. deps: { client, paths, opts:{ digestDays, fileMaxMb, now } }.
+ * Returns a summary { chats, newMessages, media, skipped }.
+ */
+export async function syncTelegram({ client, paths, opts }) {
+  const now = opts.now ?? new Date();
+  await client.connect();
+  const manifest = loadManifest(paths.manifestPath);
+  const bootstrap = Object.keys(manifest).length === 0;
+  const summary = { chats: 0, newMessages: 0, media: 0, skipped: 0 };
+  const deltaChats = [];
+
+  for (const dialog of await client.getDialogs()) {
+    const entry = manifestEntry(manifest, dialog);
+    const collected = [];
+    for await (const msg of client.iterMessages(dialog.entity, { minId: entry.lastId })) {
+      collected.push(msg);
+    }
+    if (!collected.length) {
+      summary.chats += 1;
+      continue;
+    }
+    collected.sort((a, b) => a.id - b.id); // Telegram yields newest-first; archive ascending
+    const records = collected.map(normalizeMessage);
+    const chatDir = await appendArchive(paths.archiveRoot, entry.slug, records);
+    for (let i = 0; i < records.length; i++) {
+      await downloadMessageMedia(client, collected[i], records[i], chatDir, opts.fileMaxMb);
+      if (records[i].media?.path) summary.media += 1;
+      if (records[i].media?.skipped) summary.skipped += 1;
+    }
+    updateCursor(entry, records);
+    deltaChats.push({ slug: entry.slug, title: entry.title, type: entry.type, records });
+    summary.chats += 1;
+    summary.newMessages += records.length;
+  }
+
+  await fs.promises.mkdir(path.dirname(paths.deltaPath), { recursive: true });
+  const delta = buildDelta(deltaChats, { bootstrap, digestDays: opts.digestDays, now });
+  await fs.promises.writeFile(paths.deltaPath, JSON.stringify(delta, null, 2));
+  await fs.promises.writeFile(paths.manifestPath, JSON.stringify(manifest, null, 2));
+  return summary;
+}

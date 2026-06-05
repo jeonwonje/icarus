@@ -180,3 +180,76 @@ describe('buildDelta', () => {
     expect(buildDelta([], { bootstrap: false, digestDays: 30, now }).generatedAt).toBe('2026-06-06T00:00:00.000Z');
   });
 });
+
+import os from 'node:os';
+import fsp from 'node:fs/promises';
+import pathMod from 'node:path';
+import { syncTelegram } from './sync.mjs';
+
+function fakeClient() {
+  return {
+    connected: false,
+    async connect() { this.connected = true; },
+    async getDialogs() {
+      return [
+        { id: 7, title: 'Mom', isUser: true, entity: { id: 7 } },
+        { id: 99, title: 'CDE Group', isGroup: true, entity: { id: 99 } },
+      ];
+    },
+    // newest-first like Telegram; syncTelegram must sort ascending + filter > minId
+    async *iterMessages(entity, { minId }) {
+      const all = entity.id === 7
+        ? [
+            { id: 2, date: 1749000000, message: 'hi', senderId: 7, media: null },
+            { id: 1, date: 1748000000, message: 'yo', senderId: 7, media: null },
+          ]
+        : [{ id: 5, date: 1749000000, message: 'meeting', senderId: 99, media: null }];
+      for (const m of all) if (m.id > minId) yield m;
+    },
+    async downloadMedia() { return Buffer.from(''); },
+  };
+}
+
+function makePaths(archiveDir) {
+  return {
+    archiveDir,
+    archiveRoot: pathMod.join(archiveDir, 'archive'),
+    manifestPath: pathMod.join(archiveDir, '.telegram-manifest.json'),
+    deltaPath: pathMod.join(archiveDir, 'delta', 'latest.json'),
+  };
+}
+
+describe('syncTelegram', () => {
+  it('archives all dialogs on bootstrap and writes a windowed delta', async () => {
+    const archiveDir = await fsp.mkdtemp(pathMod.join(os.tmpdir(), 'tg-'));
+    const paths = makePaths(archiveDir);
+    const summary = await syncTelegram({
+      client: fakeClient(), paths,
+      opts: { digestDays: 36500, fileMaxMb: 100, now: new Date('2026-06-06T00:00:00.000Z') },
+    });
+    expect(summary.chats).toBe(2);
+    expect(summary.newMessages).toBe(3);
+
+    const momJsonl = await fsp.readFile(pathMod.join(paths.archiveRoot, 'mom-7', 'messages.jsonl'), 'utf8');
+    expect(parseJsonl(momJsonl).map((r) => r.id)).toEqual([1, 2]); // ascending
+
+    const manifest = JSON.parse(await fsp.readFile(paths.manifestPath, 'utf8'));
+    expect(manifest['7'].lastId).toBe(2);
+
+    const delta = JSON.parse(await fsp.readFile(paths.deltaPath, 'utf8'));
+    expect(delta.bootstrap).toBe(true);
+    expect(delta.chats.map((c) => c.slug).sort()).toEqual(['cde-group-99', 'mom-7']);
+  });
+
+  it('is incremental on a second run: only newer ids, no bootstrap window', async () => {
+    const archiveDir = await fsp.mkdtemp(pathMod.join(os.tmpdir(), 'tg-'));
+    const paths = makePaths(archiveDir);
+    const opts = { digestDays: 30, fileMaxMb: 100, now: new Date('2026-06-06T00:00:00.000Z') };
+    await syncTelegram({ client: fakeClient(), paths, opts });
+    const summary = await syncTelegram({ client: fakeClient(), paths, opts }); // nothing new
+    expect(summary.newMessages).toBe(0);
+    const delta = JSON.parse(await fsp.readFile(paths.deltaPath, 'utf8'));
+    expect(delta.bootstrap).toBe(false);
+    expect(delta.chats).toHaveLength(0);
+  });
+});
