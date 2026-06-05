@@ -148,3 +148,35 @@ describe('isOversize', () => {
     expect(isOversize(50 * 1024 * 1024, 100)).toBe(false);
   });
 });
+
+import { buildDelta } from './sync.mjs';
+
+const _deltaChats = [
+  { slug: 'mom-7', title: 'Mom', type: 'user',
+    records: [
+      { id: 1, date: '2026-01-01T00:00:00.000Z', from: '7', text: 'old', reply_to: null, media: null },
+      { id: 2, date: '2026-06-05T00:00:00.000Z', from: '7', text: 'new', reply_to: null, media: null },
+    ] },
+];
+
+describe('buildDelta', () => {
+  it('on bootstrap keeps only records inside the window', () => {
+    const now = new Date('2026-06-06T00:00:00.000Z');
+    const delta = buildDelta(_deltaChats, { bootstrap: true, digestDays: 30, now });
+    expect(delta.chats).toHaveLength(1);
+    expect(delta.chats[0].records.map((r) => r.id)).toEqual([2]);
+  });
+  it('on incremental keeps every new record regardless of age', () => {
+    const delta = buildDelta(_deltaChats, { bootstrap: false, digestDays: 30, now: new Date('2026-06-06T00:00:00.000Z') });
+    expect(delta.chats[0].records.map((r) => r.id)).toEqual([1, 2]);
+  });
+  it('drops chats that have no records after windowing', () => {
+    const now = new Date('2030-01-01T00:00:00.000Z');
+    const delta = buildDelta(_deltaChats, { bootstrap: true, digestDays: 30, now });
+    expect(delta.chats).toHaveLength(0);
+  });
+  it('stamps generatedAt from now', () => {
+    const now = new Date('2026-06-06T00:00:00.000Z');
+    expect(buildDelta([], { bootstrap: false, digestDays: 30, now }).generatedAt).toBe('2026-06-06T00:00:00.000Z');
+  });
+});

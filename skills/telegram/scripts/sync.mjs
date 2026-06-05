@@ -132,3 +132,19 @@ export function updateCursor(entry, records) {
 export function isOversize(sizeBytes, capMb) {
   return sizeBytes > capMb * 1024 * 1024;
 }
+
+/**
+ * Assemble delta/latest.json from this run's per-chat new records.
+ * Bootstrap runs window to the last `digestDays` days so Claude never
+ * summarizes years of backlog; incremental runs pass everything through.
+ * Chats with no surviving records are dropped.
+ */
+export function buildDelta(chats, { bootstrap, digestDays, now }) {
+  const cutoff = bootstrap ? new Date(now.getTime() - digestDays * 86400000) : null;
+  const out = [];
+  for (const c of chats) {
+    const records = cutoff ? c.records.filter((r) => new Date(r.date) >= cutoff) : c.records;
+    if (records.length) out.push({ slug: c.slug, title: c.title, type: c.type, records });
+  }
+  return { generatedAt: now.toISOString(), bootstrap, chats: out };
+}
