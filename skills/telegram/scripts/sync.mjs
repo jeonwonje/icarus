@@ -32,3 +32,29 @@ export function resolvePaths(env = process.env) {
     deltaPath: path.join(archiveDir, 'delta', 'latest.json'),
   };
 }
+
+/** One safe, lowercase path segment: separators/space → '-', control chars stripped. */
+export function sanitizeSegment(name) {
+  const s = String(name ?? '')
+    .replace(/\p{Cc}/gu, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[/\\\s]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return s;
+}
+
+/** Stable per-dialog slug: sanitized title + numeric id (always unique + readable). */
+export function slugify(title, id) {
+  const base = sanitizeSegment(title) || 'chat';
+  return `${base}-${id}`;
+}
+
+/** Bucket a GramJS dialog: user → DM, anything else → group/channel. */
+export function dialogType(dialog) {
+  if (dialog.isUser) return 'user';
+  if (dialog.isChannel) return 'channel';
+  return 'group';
+}
