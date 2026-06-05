@@ -38,6 +38,12 @@ The hub itself (OneDrive) holds `CLAUDE.md`, `index.md` + `wiki/`,
 - **Secrets come from the environment** (`~/.bashrc`), never committed and never
   written into the hub (OneDrive syncs to the cloud).
 - Tests: `npm test` (vitest over `skills/**/*.test.mjs`). No TypeScript.
+- **Exception — `telegram`:** the one skill that is *not* dependency-free. MTProto
+  cannot be built from Node built-ins, so it depends on GramJS (`telegram`) +
+  `input`. It requires `npm install`; canvas/outlook still run anywhere. Its raw
+  archive is deliberately stored **outside** the hub (local-only) because it
+  contains other people's private messages — only Claude-written digests land in
+  the hub.
 
 ## Adding a source
 

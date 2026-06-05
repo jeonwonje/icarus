@@ -86,6 +86,19 @@ hash-deduped attachments under `email/attachments/`. Dedups by `Message-ID` via
   later runs triage only new mail.
 - Invoke with `/outlook` or "check my email".
 
+### telegram
+
+Archives all Telegram chats locally (DMs/groups/channels) and distills them into
+per-chat digests in `telegram/`. Needs `npm install` (GramJS).
+
+- Depends on `telegram` + `input` npm packages (MTProto — cannot be built from
+  Node built-ins). Run `npm install` before first use.
+- Raw archive lives **outside** the hub (local-only) — it contains other people's
+  private messages. Only Claude-written digests land in the hub.
+- Needs `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` exported in `~/.bashrc`; run
+  `node skills/telegram/scripts/login.mjs` once to authenticate.
+- In the hub: say "sync my telegram" or `/telegram`.
+
 ## Adding a data source
 
 1. `cp -r skills/_template skills/<source>`
