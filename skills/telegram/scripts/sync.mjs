@@ -81,3 +81,54 @@ export function normalizeMessage(msg) {
     media: describeMedia(msg),
   };
 }
+
+/** Records → newline-delimited JSON (trailing newline). */
+export function toJsonl(records) {
+  return records.map((r) => JSON.stringify(r)).join('\n') + (records.length ? '\n' : '');
+}
+
+/** Newline-delimited JSON → records (blank lines ignored). */
+export function parseJsonl(text) {
+  return text
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => JSON.parse(l));
+}
+
+/** Load the manifest JSON, or {} when it does not exist yet. */
+export function loadManifest(manifestPath) {
+  try {
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/** Get (creating if absent) the manifest entry for a dialog. */
+export function manifestEntry(manifest, dialog) {
+  const key = String(dialog.id);
+  if (!manifest[key]) {
+    manifest[key] = {
+      title: dialog.title ?? '',
+      type: dialogType(dialog),
+      slug: slugify(dialog.title, dialog.id),
+      lastId: 0,
+      lastDigestedId: 0,
+      mediaIds: [],
+    };
+  }
+  return manifest[key];
+}
+
+/** Advance lastId to the max id seen and append ids of messages that carried media. */
+export function updateCursor(entry, records) {
+  for (const r of records) {
+    if (r.id > entry.lastId) entry.lastId = r.id;
+    if (r.media && !entry.mediaIds.includes(r.id)) entry.mediaIds.push(r.id);
+  }
+}
+
+/** True when a byte size exceeds the MB cap. */
+export function isOversize(sizeBytes, capMb) {
+  return sizeBytes > capMb * 1024 * 1024;
+}

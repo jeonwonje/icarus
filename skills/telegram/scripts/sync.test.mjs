@@ -56,6 +56,7 @@ describe('dialogType', () => {
   });
 });
 
+import { toJsonl, parseJsonl, loadManifest, manifestEntry, updateCursor, isOversize } from './sync.mjs';
 import { describeMedia, normalizeMessage } from './sync.mjs';
 
 describe('describeMedia', () => {
@@ -95,5 +96,55 @@ describe('normalizeMessage', () => {
   it('defaults text, sender and reply when absent', () => {
     const r = normalizeMessage({ id: 1, date: 0, media: null });
     expect(r).toEqual({ id: 1, date: '1970-01-01T00:00:00.000Z', from: null, text: '', reply_to: null, media: null });
+  });
+});
+
+describe('jsonl', () => {
+  it('round-trips records', () => {
+    const recs = [{ id: 1, text: 'a' }, { id: 2, text: 'b' }];
+    expect(parseJsonl(toJsonl(recs))).toEqual(recs);
+  });
+  it('parseJsonl ignores blank lines', () => {
+    expect(parseJsonl('{"id":1}\n\n')).toEqual([{ id: 1 }]);
+  });
+});
+
+describe('loadManifest', () => {
+  it('returns {} for a missing file', () => {
+    expect(loadManifest('/no/such/manifest.json')).toEqual({});
+  });
+});
+
+describe('manifestEntry', () => {
+  it('initializes a fresh entry for an unseen dialog', () => {
+    const m = {};
+    const e = manifestEntry(m, { id: 7, title: 'Mom', isUser: true });
+    expect(e).toEqual({ title: 'Mom', type: 'user', slug: 'mom-7', lastId: 0, lastDigestedId: 0, mediaIds: [] });
+    expect(m['7']).toBe(e);
+  });
+  it('returns the existing entry on subsequent calls', () => {
+    const m = { '7': { title: 'Mom', type: 'user', slug: 'mom-7', lastId: 5, lastDigestedId: 5, mediaIds: [3] } };
+    expect(manifestEntry(m, { id: 7, title: 'Mom', isUser: true }).lastId).toBe(5);
+  });
+});
+
+describe('updateCursor', () => {
+  it('advances lastId and records media ids', () => {
+    const e = { lastId: 0, mediaIds: [] };
+    updateCursor(e, [{ id: 10, media: { type: 'photo' } }, { id: 12, media: null }]);
+    expect(e.lastId).toBe(12);
+    expect(e.mediaIds).toEqual([10]);
+  });
+  it('never moves lastId backward', () => {
+    const e = { lastId: 99, mediaIds: [] };
+    updateCursor(e, [{ id: 5, media: null }]);
+    expect(e.lastId).toBe(99);
+  });
+});
+
+describe('isOversize', () => {
+  it('compares bytes against a MB cap', () => {
+    expect(isOversize(200 * 1024 * 1024, 100)).toBe(true);
+    expect(isOversize(50 * 1024 * 1024, 100)).toBe(false);
   });
 });
