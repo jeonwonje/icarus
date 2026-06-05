@@ -234,3 +234,39 @@ export async function syncTelegram({ client, paths, opts }) {
   await persist();
   return summary;
 }
+
+/** CLI entry: build a live GramJS client from env, run the sync, print a summary. */
+async function main() {
+  const { TelegramClient } = await import('telegram');
+  const { StringSession } = await import('telegram/sessions/index.js');
+  const cfg = resolveEnv();
+  const paths = resolvePaths();
+  const opts = {
+    digestDays: Number(process.env.TELEGRAM_DIGEST_DAYS || 30),
+    fileMaxMb: Number(process.env.TELEGRAM_FILE_MAX_MB || 100),
+    now: new Date(),
+  };
+  const client = new TelegramClient(new StringSession(cfg.session), cfg.apiId, cfg.apiHash, {
+    connectionRetries: 5,
+  });
+  const s = await syncTelegram({ client, paths, opts });
+  await client.disconnect();
+  console.log(
+    `telegram: ${s.chats} chats, ${s.newMessages} new messages, ${s.media} media, ${s.skipped} skipped-oversize → ${paths.archiveDir}`,
+  );
+}
+
+// Run only when executed directly (icarus convention: realpath both sides).
+function realPath(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+if (process.argv[1] && realPath(process.argv[1]) === realPath(fileURLToPath(import.meta.url))) {
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
+}
