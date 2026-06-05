@@ -55,3 +55,45 @@ describe('dialogType', () => {
     expect(dialogType({})).toBe('group');
   });
 });
+
+import { describeMedia, normalizeMessage } from './sync.mjs';
+
+describe('describeMedia', () => {
+  it('returns null when there is no media', () => {
+    expect(describeMedia({ media: null })).toBe(null);
+  });
+  it('extracts a type + byte size from a photo/document', () => {
+    const msg = { media: { className: 'MessageMediaDocument', document: { size: 2048 } } };
+    expect(describeMedia(msg)).toEqual({ type: 'document', size: 2048 });
+  });
+  it('handles photo media with no explicit size', () => {
+    const msg = { media: { className: 'MessageMediaPhoto', photo: {} } };
+    expect(describeMedia(msg)).toEqual({ type: 'photo', size: 0 });
+  });
+});
+
+describe('normalizeMessage', () => {
+  it('maps a GramJS message to the archive record shape', () => {
+    const msg = {
+      id: 48213,
+      date: 1749212400,
+      message: 'see you at 6',
+      senderId: { value: 1404758730n },
+      replyTo: { replyToMsgId: 48190 },
+      media: null,
+    };
+    const r = normalizeMessage(msg);
+    expect(r).toEqual({
+      id: 48213,
+      date: new Date(1749212400 * 1000).toISOString(),
+      from: '1404758730',
+      text: 'see you at 6',
+      reply_to: 48190,
+      media: null,
+    });
+  });
+  it('defaults text, sender and reply when absent', () => {
+    const r = normalizeMessage({ id: 1, date: 0, media: null });
+    expect(r).toEqual({ id: 1, date: '1970-01-01T00:00:00.000Z', from: null, text: '', reply_to: null, media: null });
+  });
+});

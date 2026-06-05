@@ -58,3 +58,26 @@ export function dialogType(dialog) {
   if (dialog.isChannel) return 'channel';
   return 'group';
 }
+
+/** Summarize a message's media as { type, size } (no download here), or null. */
+export function describeMedia(msg) {
+  const m = msg.media;
+  if (!m) return null;
+  const cls = m.className || '';
+  if (cls.includes('Photo')) return { type: 'photo', size: Number(m.photo?.size ?? 0) };
+  if (cls.includes('Document')) return { type: 'document', size: Number(m.document?.size ?? 0) };
+  return { type: 'other', size: 0 };
+}
+
+/** Telegram message → normalized archive record. Pure: no I/O. */
+export function normalizeMessage(msg) {
+  const senderId = msg.senderId?.value ?? msg.senderId ?? null;
+  return {
+    id: msg.id,
+    date: new Date(Number(msg.date) * 1000).toISOString(),
+    from: senderId == null ? null : String(senderId),
+    text: msg.message ?? '',
+    reply_to: msg.replyTo?.replyToMsgId ?? null,
+    media: describeMedia(msg),
+  };
+}
