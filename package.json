@@ -7,6 +7,10 @@
   "scripts": {
     "test": "vitest run"
   },
+  "dependencies": {
+    "telegram": "^2.26.0",
+    "input": "^1.0.1"
+  },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "vitest": "^2.1.0"
