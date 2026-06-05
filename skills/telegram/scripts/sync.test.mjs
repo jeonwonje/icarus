@@ -149,6 +149,17 @@ describe('isOversize', () => {
   });
 });
 
+import { mediaFilename } from './sync.mjs';
+describe('mediaFilename', () => {
+  it('prefers the document filename attribute', () => {
+    const msg = { id: 3, media: { document: { attributes: [{ className: 'DocumentAttributeFilename', fileName: 'report.pdf' }] } } };
+    expect(mediaFilename(msg, { media: { type: 'document' } })).toBe('3-report.pdf');
+  });
+  it('falls back to <id>-<type> when there is no filename', () => {
+    expect(mediaFilename({ id: 9, media: { photo: {} } }, { media: { type: 'photo' } })).toBe('9-photo');
+  });
+});
+
 import { buildDelta } from './sync.mjs';
 
 const _deltaChats = [
@@ -251,5 +262,55 @@ describe('syncTelegram', () => {
     const delta = JSON.parse(await fsp.readFile(paths.deltaPath, 'utf8'));
     expect(delta.bootstrap).toBe(false);
     expect(delta.chats).toHaveLength(0);
+  });
+});
+
+describe('syncTelegram media handling', () => {
+  const baseOpts = { digestDays: 36500, fileMaxMb: 100, now: new Date('2026-06-06T00:00:00.000Z') };
+  function mediaClient(downloadImpl, size = 1024) {
+    return {
+      async connect() {},
+      async getDialogs() { return [{ id: 7, title: 'Mom', isUser: true, entity: { id: 7 } }]; },
+      async *iterMessages(e, { minId }) {
+        const all = [{ id: 3, date: 1749000000, message: '', senderId: 7,
+          media: { className: 'MessageMediaDocument', document: { size, attributes: [{ className: 'DocumentAttributeFilename', fileName: 'report.pdf' }] } } }];
+        for (const m of all) if (m.id > minId) yield m;
+      },
+      downloadMedia: downloadImpl,
+    };
+  }
+
+  it('downloads media, stores it with its real name, and records the path in jsonl', async () => {
+    const archiveDir = await fsp.mkdtemp(pathMod.join(os.tmpdir(), 'tg-'));
+    const paths = makePaths(archiveDir);
+    const s = await syncTelegram({ client: mediaClient(async () => Buffer.from('PDFDATA')), paths, opts: baseOpts });
+    expect(s.media).toBe(1);
+    expect(await fsp.readFile(pathMod.join(paths.archiveRoot, 'mom-7', 'media', '3-report.pdf'), 'utf8')).toBe('PDFDATA');
+    const recs = parseJsonl(await fsp.readFile(pathMod.join(paths.archiveRoot, 'mom-7', 'messages.jsonl'), 'utf8'));
+    expect(recs[0].media).toEqual({ type: 'document', path: pathMod.join('media', '3-report.pdf'), size: 1024 });
+  });
+
+  it('skips oversize media without calling downloadMedia', async () => {
+    const archiveDir = await fsp.mkdtemp(pathMod.join(os.tmpdir(), 'tg-'));
+    const paths = makePaths(archiveDir);
+    let called = false;
+    const client = mediaClient(async () => { called = true; return Buffer.from('x'); }, 200 * 1024 * 1024);
+    const s = await syncTelegram({ client, paths, opts: baseOpts });
+    expect(called).toBe(false);
+    expect(s.skipped).toBe(1);
+    const recs = parseJsonl(await fsp.readFile(pathMod.join(paths.archiveRoot, 'mom-7', 'messages.jsonl'), 'utf8'));
+    expect(recs[0].media.skipped).toBe('oversize');
+  });
+
+  it('isolates a media download failure and still completes the run', async () => {
+    const archiveDir = await fsp.mkdtemp(pathMod.join(os.tmpdir(), 'tg-'));
+    const paths = makePaths(archiveDir);
+    const client = mediaClient(async () => { throw new Error('network'); });
+    const s = await syncTelegram({ client, paths, opts: baseOpts });
+    expect(s.skipped).toBe(1);
+    const manifest = JSON.parse(await fsp.readFile(paths.manifestPath, 'utf8'));
+    expect(manifest['7'].lastId).toBe(3); // cursor advanced despite media failure
+    const recs = parseJsonl(await fsp.readFile(pathMod.join(paths.archiveRoot, 'mom-7', 'messages.jsonl'), 'utf8'));
+    expect(recs[0].media.skipped).toBe('error');
   });
 });

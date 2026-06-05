@@ -149,7 +149,15 @@ export function buildDelta(chats, { bootstrap, digestDays, now }) {
   return { generatedAt: now.toISOString(), bootstrap, chats: out };
 }
 
-/** Download one message's media to <chatDir>/media, honoring the size cap. */
+/** Stored media filename: prefer the document's own name (keeps extension), else <id>-<type>. */
+export function mediaFilename(msg, record) {
+  const attrs = msg.media?.document?.attributes || [];
+  const named = attrs.find((a) => (a.className || '').includes('Filename'));
+  if (named?.fileName) return `${msg.id}-${named.fileName}`;
+  return `${msg.id}-${record.media.type}`;
+}
+
+/** Download one message's media into <chatDir>/media, honoring the cap; never throws. */
 async function downloadMessageMedia(client, msg, record, chatDir, fileMaxMb) {
   if (!record.media) return;
   if (isOversize(record.media.size, fileMaxMb)) {
@@ -157,13 +165,17 @@ async function downloadMessageMedia(client, msg, record, chatDir, fileMaxMb) {
     return;
   }
   const mediaDir = path.join(chatDir, 'media');
-  await fs.promises.mkdir(mediaDir, { recursive: true });
-  const buf = await client.downloadMedia(msg, {});
-  if (!buf) return;
-  const dest = path.join(mediaDir, `${msg.id}-${record.media.type}`);
-  await fs.promises.writeFile(dest, buf);
-  await fs.promises.chmod(dest, READ_ONLY).catch(() => {});
-  record.media = { type: record.media.type, path: path.relative(chatDir, dest), size: record.media.size };
+  try {
+    await fs.promises.mkdir(mediaDir, { recursive: true });
+    const buf = await client.downloadMedia(msg, {});
+    if (!buf) return;
+    const dest = path.join(mediaDir, mediaFilename(msg, record));
+    await fs.promises.writeFile(dest, buf);
+    await fs.promises.chmod(dest, READ_ONLY).catch(() => {});
+    record.media = { type: record.media.type, path: path.relative(chatDir, dest), size: record.media.size };
+  } catch (err) {
+    record.media = { type: record.media.type, skipped: 'error', size: record.media.size, error: String(err?.message || err) };
+  }
 }
 
 /** Append records to a chat's messages.jsonl, creating the dir as needed. */
@@ -186,6 +198,7 @@ export async function syncTelegram({ client, paths, opts }) {
   const bootstrap = Object.keys(manifest).length === 0;
   const summary = { chats: 0, newMessages: 0, media: 0, skipped: 0 };
   const deltaChats = [];
+  const persist = () => fs.promises.writeFile(paths.manifestPath, JSON.stringify(manifest, null, 2));
 
   for (const dialog of await client.getDialogs()) {
     const entry = manifestEntry(manifest, dialog);
@@ -199,13 +212,17 @@ export async function syncTelegram({ client, paths, opts }) {
     }
     collected.sort((a, b) => a.id - b.id); // Telegram yields newest-first; archive ascending
     const records = collected.map(normalizeMessage);
-    const chatDir = await appendArchive(paths.archiveRoot, entry.slug, records);
+    const chatDir = path.join(paths.archiveRoot, entry.slug);
+    await fs.promises.mkdir(chatDir, { recursive: true });
+    // Download media first so the JSONL captures the final media path/skipped state.
     for (let i = 0; i < records.length; i++) {
-      await downloadMessageMedia(client, collected[i], records[i], chatDir, opts.fileMaxMb);
+      await downloadMessageMedia(client, collected[i], records[i], chatDir, opts.fileMaxMb ?? 100);
       if (records[i].media?.path) summary.media += 1;
       if (records[i].media?.skipped) summary.skipped += 1;
     }
+    await appendArchive(paths.archiveRoot, entry.slug, records);
     updateCursor(entry, records);
+    await persist();
     deltaChats.push({ slug: entry.slug, title: entry.title, type: entry.type, records });
     summary.chats += 1;
     summary.newMessages += records.length;
@@ -214,6 +231,6 @@ export async function syncTelegram({ client, paths, opts }) {
   await fs.promises.mkdir(path.dirname(paths.deltaPath), { recursive: true });
   const delta = buildDelta(deltaChats, { bootstrap, digestDays: opts.digestDays, now });
   await fs.promises.writeFile(paths.deltaPath, JSON.stringify(delta, null, 2));
-  await fs.promises.writeFile(paths.manifestPath, JSON.stringify(manifest, null, 2));
+  await persist();
   return summary;
 }
