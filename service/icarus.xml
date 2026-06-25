@@ -1,0 +1,14 @@
+<service>
+  <id>icarus</id>
+  <name>Icarus Knowledge Agent</name>
+  <description>Telegram-driven Claude Agent SDK knowledge service grounded on a local hub.</description>
+  <executable>node</executable>
+  <arguments>dist\index.js</arguments>
+  <workingdirectory>%BASE%\..</workingdirectory>
+  <onfailure action="restart" delay="10 sec"/>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <startmode>Automatic</startmode>
+</service>

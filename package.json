@@ -1,0 +1,35 @@
+{
+  "name": "icarus",
+  "version": "0.1.0",
+  "description": "Always-on Windows knowledge-agent service: Telegram-driven Claude Agent SDK grounded on a local hub.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run clean && tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "ingest:canvas": "tsx src/ingest/canvas.ts",
+    "ingest:outlook": "tsx src/ingest/outlook.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.179",
+    "@grammyjs/runner": "^2.0.3",
+    "better-sqlite3": "^11.10.0",
+    "grammy": "^1.41.1",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "pst-extractor": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": { "node": ">=20" }
+}

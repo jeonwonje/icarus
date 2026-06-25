@@ -1,0 +1,24 @@
+# Secrets
+.env
+
+# Local knowledge base / machine state
+hub/
+
+# Node
+node_modules/
+dist/
+*.log
+
+# Python (doc skills venv)
+.venv/
+__pycache__/
+*.pyc
+
+# Service binary (downloaded, not versioned content)
+src/service/WinSW.exe
+
+# WinSW binary (downloaded by setup.ps1, not versioned)
+service/WinSW.exe
+
+# SDD scratch (briefs, reports, review diffs)
+.superpowers/

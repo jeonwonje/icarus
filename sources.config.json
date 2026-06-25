@@ -1,0 +1,11 @@
+{
+  "canvas": {
+    "courses": [],
+    "modules": []
+  },
+  "outlook": {
+    "senderAllow": [],
+    "folderAllow": [],
+    "folderBlock": ["Junk Email"]
+  }
+}
