@@ -86,6 +86,23 @@ describe('applyTriageVerdicts', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it('disambiguates instead of overwriting an existing dest file', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-triage3-'));
+    const destDir = path.join(root, 'out');
+    const filteredDir = path.join(destDir, '_filtered');
+    const graytriageDir = path.join(destDir, '_graytriage');
+    for (const d of [destDir, filteredDir, graytriageDir]) fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(destDir, '2026-01-01_x.md'), 'pre-existing');
+    const f = path.join(graytriageDir, '2026-01-01_x.md');
+    fs.writeFileSync(f, 'gray-keep');
+    const counters = { kept: 0, filteredBlock: 0, filteredLlm: 0, gray: 0, attachments: 0, skipped: 0 };
+    applyTriageVerdicts([{ id: 'g0', sender: 's', subject: 'x', file: f }], new Map([['g0', 'keep' as const]]), { destDir, filteredDir, graytriageDir }, counters);
+    expect(fs.readFileSync(path.join(destDir, '2026-01-01_x.md'), 'utf-8')).toBe('pre-existing'); // untouched
+    expect(fs.readFileSync(path.join(destDir, '2026-01-01_x_2.md'), 'utf-8')).toBe('gray-keep');  // disambiguated
+    expect(counters.kept).toBe(1);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   it('defaults a missing verdict to keep', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-triage2-'));
     const destDir = path.join(root, 'out');

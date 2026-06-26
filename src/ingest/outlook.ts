@@ -144,6 +144,16 @@ interface TriageDirs {
   graytriageDir: string;
 }
 
+/** A path in `dir` for `name` that does not already exist, appending _2/_3/... on collision. */
+export function uniquePath(dir: string, name: string): string {
+  if (!fs.existsSync(path.join(dir, name))) return path.join(dir, name);
+  const ext = path.extname(name);
+  const base = name.slice(0, name.length - ext.length);
+  let i = 2;
+  while (fs.existsSync(path.join(dir, `${base}_${i}${ext}`))) i++;
+  return path.join(dir, `${base}_${i}${ext}`);
+}
+
 /** Insert a `- **Filtered:** <reason>` line right after the Folder line. */
 export function injectFilteredLine(content: string, reason: string): string {
   const lines = content.split('\n');
@@ -167,12 +177,12 @@ export function applyTriageVerdicts(
       if (verdict === 'junk') {
         const content = fs.readFileSync(g.file, 'utf-8');
         fs.mkdirSync(dirs.filteredDir, { recursive: true });
-        fs.writeFileSync(path.join(dirs.filteredDir, name), injectFilteredLine(content, 'llm:junk'));
+        fs.writeFileSync(uniquePath(dirs.filteredDir, name), injectFilteredLine(content, 'llm:junk'));
         fs.unlinkSync(g.file);
         counters.filteredLlm++;
       } else {
         fs.mkdirSync(dirs.destDir, { recursive: true });
-        fs.renameSync(g.file, path.join(dirs.destDir, name));
+        fs.renameSync(g.file, uniquePath(dirs.destDir, name));
         counters.kept++;
       }
     } catch (err) {
@@ -217,19 +227,19 @@ function walkFolder(
           if (verdict === 'block') {
             fs.mkdirSync(dirs.filteredDir, { recursive: true });
             fs.writeFileSync(
-              path.join(dirs.filteredDir, name),
+              uniquePath(dirs.filteredDir, name),
               renderMessage(msg, folderName, outlookBlockReason(cfg, sender)),
             );
             counters.filteredBlock++;
           } else if (verdict === 'gray') {
             fs.mkdirSync(dirs.graytriageDir, { recursive: true });
-            const file = path.join(dirs.graytriageDir, name);
+            const file = uniquePath(dirs.graytriageDir, name);
             fs.writeFileSync(file, renderMessage(msg, folderName));
             gray.push({ id: `g${gray.length}`, sender, subject: msg.subject || '', file });
             counters.gray++;
           } else {
             fs.mkdirSync(dirs.destDir, { recursive: true });
-            fs.writeFileSync(path.join(dirs.destDir, name), renderMessage(msg, folderName));
+            fs.writeFileSync(uniquePath(dirs.destDir, name), renderMessage(msg, folderName));
             counters.kept++;
           }
 

@@ -171,7 +171,7 @@ export function classifyOutlookSender(
   const local = senderLocalpart(input.sender);
   // BLOCK wins.
   if (domain && domainMatches(domain, cfg.outlook.senderBlockDomains)) return 'block';
-  if (cfg.outlook.senderBlockLocalparts.some((t) => local.includes(t))) return 'block';
+  if (domain && cfg.outlook.senderBlockLocalparts.some((t) => local.includes(t))) return 'block';
   // GRAY: bulk-ish ambiguous mail.
   if (input.isBulk) return 'gray';
   if (domain && (domain.startsWith('groups.') || domain.startsWith('lists.'))) return 'gray';
@@ -186,9 +186,8 @@ export function outlookBlockReason(cfg: SourcesConfig, sender: string): string {
   if (domain) {
     const d = cfg.outlook.senderBlockDomains.find((x) => domain === x || domain.endsWith('.' + x));
     if (d) return `blocklist:${d}`;
+    const t = cfg.outlook.senderBlockLocalparts.find((x) => senderLocalpart(sender).includes(x));
+    if (t) return `blocklist:${t}`;
   }
-  const local = senderLocalpart(sender);
-  const t = cfg.outlook.senderBlockLocalparts.find((x) => local.includes(x));
-  if (t) return `blocklist:${t}`;
   return 'blocklist:unknown';
 }

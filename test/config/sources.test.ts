@@ -89,7 +89,7 @@ const clsCfg: SourcesConfig = {
     attachmentMinImageKB: 50,
     dropInlineImages: true,
     senderBlockDomains: ['instructure.com', 'campuslabs.com', 'opal.so'],
-    senderBlockLocalparts: ['noreply', 'notifications', 'marketing'],
+    senderBlockLocalparts: ['noreply', 'notifications', 'marketing', 'alerts'],
     grayDomains: ['groups.nus.edu.sg', 'coursemology.org'],
     triageEnabled: true,
   },
@@ -116,6 +116,13 @@ describe('classifyOutlookSender', () => {
   });
   it('block wins over a bulk signal', () => {
     expect(classifyOutlookSender(clsCfg, { sender: 'marketing@opal.so', isBulk: true })).toBe('block');
+  });
+  it('keeps an X.500 DN even when it contains a block-token substring', () => {
+    expect(classifyOutlookSender(clsCfg, { sender: '/o=ExchangeLabs/ou=x/cn=recipients/cn=abc-alerts-team', isBulk: false })).toBe('keep');
+  });
+  it('greys a no-@ sender only when a bulk signal is present', () => {
+    expect(classifyOutlookSender(clsCfg, { sender: '/o=ExchangeLabs/cn=marketing-team', isBulk: true })).toBe('gray');
+    expect(classifyOutlookSender(clsCfg, { sender: '/o=ExchangeLabs/cn=marketing-team', isBulk: false })).toBe('keep');
   });
 });
 
