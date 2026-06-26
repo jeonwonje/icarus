@@ -9,6 +9,7 @@ import {
   loadSourcesConfig,
   outlookFolderAllowed,
   outlookSenderAllowed,
+  outlookAttachmentAllowed,
   type SourcesConfig,
 } from '../config/sources.js';
 import { rawOutlookDir } from '../memory/scaffold.js';
@@ -25,6 +26,12 @@ export function messageFileName(subject: string, dateIso: string): string {
 
 function senderOf(msg: PSTMessage): string {
   return (msg.senderEmailAddress || msg.senderName || 'unknown').trim();
+}
+
+/** Lowercased extension without the dot; '' when the name has none. */
+function fileExt(name: string): string {
+  const m = /\.([A-Za-z0-9]{1,6})$/.exec(name || '');
+  return m ? m[1].toLowerCase() : '';
 }
 
 function renderMessage(msg: PSTMessage, folder: string): string {
@@ -49,8 +56,9 @@ function renderMessage(msg: PSTMessage, folder: string): string {
 function extractAttachments(
   msg: PSTMessage,
   attachmentsDir: string,
-  counters: { attachments: number },
+  counters: { attachments: number; skipped: number },
   messageStem: string,
+  cfg: SourcesConfig,
 ): void {
   try {
     const count = msg.numberOfAttachments;
@@ -59,10 +67,21 @@ function extractAttachments(
     for (let i = 0; i < count; i++) {
       try {
         const att: PSTAttachment = msg.getAttachment(i);
-        const rawName =
-          (att.longFilename || att.filename || '').trim() ||
-          `attachment_${i}`;
-        const safeName = sanitizeFileName(rawName).slice(0, 80) || `attachment_${i}`;
+        const rawName = (att.longFilename || att.filename || '').trim();
+        const ext = fileExt(rawName);
+        let contentId = '';
+        let mimeTag = '';
+        let sizeBytes = 0;
+        try { contentId = att.contentId || ''; } catch { /* default '' */ }
+        try { mimeTag = att.mimeTag || ''; } catch { /* default '' */ }
+        try { sizeBytes = att.filesize || 0; } catch { /* default 0 */ }
+
+        if (!outlookAttachmentAllowed(cfg, { ext, contentId, mimeTag, sizeBytes })) {
+          counters.skipped++;
+          continue;
+        }
+
+        const safeName = sanitizeFileName(rawName || `attachment_${i}`).slice(0, 80) || `attachment_${i}`;
         // Prefix with per-message stem so attachments from different messages never collide
         const destName = `${messageStem}__${i}_${safeName}`;
         const destPath = path.join(attachmentsDir, destName);
@@ -95,7 +114,7 @@ function walkFolder(
   folder: PSTFolder,
   cfg: SourcesConfig,
   destDir: string,
-  counters: { written: number; attachments: number },
+  counters: { written: number; attachments: number; skipped: number },
 ): void {
   const folderName = folder.displayName || 'Unknown';
   const folderAllowed = outlookFolderAllowed(cfg, folderName);
@@ -114,7 +133,7 @@ function walkFolder(
 
           const attachmentsDir = path.join(rawOutlookDir(), 'attachments');
           const messageStem = messageFileName(msg.subject || '', date).replace(/\.md$/, '');
-          extractAttachments(msg, attachmentsDir, counters, messageStem);
+          extractAttachments(msg, attachmentsDir, counters, messageStem, cfg);
         }
       }
       msg = folder.getNextChild() as PSTMessage | null;
@@ -135,10 +154,15 @@ export async function main(): Promise<void> {
   }
   const cfg = loadSourcesConfig();
   const pst = new PSTFile(OUTLOOK_PST_PATH);
-  const counters = { written: 0, attachments: 0 };
+  const counters = { written: 0, attachments: 0, skipped: 0 };
   walkFolder(pst.getRootFolder(), cfg, rawOutlookDir(), counters);
-  logger.info({ written: counters.written, attachments: counters.attachments }, 'outlook ingest complete');
-  process.stdout.write(`Outlook ingest complete: ${counters.written} messages, ${counters.attachments} attachments.\n`);
+  logger.info(
+    { written: counters.written, attachments: counters.attachments, skipped: counters.skipped },
+    'outlook ingest complete',
+  );
+  process.stdout.write(
+    `Outlook ingest complete: ${counters.written} messages, ${counters.attachments} attachments kept, ${counters.skipped} skipped.\n`,
+  );
 }
 
 // Run when invoked directly (tsx src/ingest/outlook.ts or node dist/ingest/outlook.js).
