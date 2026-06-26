@@ -4,7 +4,12 @@ import path from 'path';
 import { Bot, InputFile, type Api } from 'grammy';
 import { run, type RunnerHandle } from '@grammyjs/runner';
 
-import { CHANNELS, TELEGRAM_BOT_TOKEN, type ChannelName } from '../core/config.js';
+import {
+  TOPICS,
+  TELEGRAM_SUPERGROUP_ID,
+  TELEGRAM_BOT_TOKEN,
+  type ChannelName,
+} from '../core/config.js';
 import { logger } from '../core/logger.js';
 import { rawDir } from '../memory/scaffold.js';
 import { sanitizeFileName } from '../core/slug.js';
@@ -12,6 +17,7 @@ import { sanitizeFileName } from '../core/slug.js';
 export interface ChannelMessage {
   channel: ChannelName;
   chatId: number;
+  threadId: number; // forum topic thread id — replies go back to this topic
   senderId: string;
   senderName: string | null;
   content: string;
@@ -24,11 +30,19 @@ export interface TelegramHandlers {
   onChannelMessage: (m: ChannelMessage) => Promise<void>;
 }
 
-/** Map an incoming Telegram chat id to one of the three channels, or null. */
-export function channelForChatId(chatId: string | number): ChannelName | null {
-  const id = String(chatId);
+/**
+ * Map an incoming message to one of the three channels by (supergroup chat id,
+ * forum topic thread id), or null if it isn't in a configured supergroup topic.
+ */
+export function channelForMessage(
+  chatId: string | number,
+  threadId: number | undefined,
+): ChannelName | null {
+  if (!TELEGRAM_SUPERGROUP_ID || String(chatId) !== TELEGRAM_SUPERGROUP_ID) return null;
+  if (threadId === undefined) return null;
+  const tid = String(threadId);
   for (const name of ['personal', 'academic', 'work'] as ChannelName[]) {
-    if (CHANNELS[name] && CHANNELS[name] === id) return name;
+    if (TOPICS[name] && TOPICS[name] === tid) return name;
   }
   return null;
 }
@@ -44,10 +58,12 @@ export function createBot(handlers: TelegramHandlers): Bot {
   bot.on('message', async (ctx) => {
     const chatId = ctx.chat?.id;
     if (chatId === undefined) return;
-    const channel = channelForChatId(chatId);
-    if (!channel) return; // ignore unconfigured chats
 
     const message = ctx.message as unknown as Record<string, unknown>;
+    const threadId = message.message_thread_id as number | undefined;
+    const channel = channelForMessage(chatId, threadId);
+    if (!channel) return; // ignore anything outside the configured supergroup topics
+
     const text = (message.text as string | undefined) ?? (message.caption as string | undefined) ?? '';
 
     // Download any attachment into the hub inbox (raw/ root).
@@ -72,6 +88,7 @@ export function createBot(handlers: TelegramHandlers): Bot {
     const msg: ChannelMessage = {
       channel,
       chatId,
+      threadId: threadId as number, // non-null: channelForMessage matched a topic
       senderId: String(from?.id ?? ''),
       senderName: senderDisplay(from),
       content: text || '(file uploaded)',
@@ -125,28 +142,36 @@ export async function startBot(bot: Bot): Promise<RunnerHandle> {
   return run(bot);
 }
 
-export async function sendText(api: Api, chatId: number, text: string): Promise<void> {
+export async function sendText(
+  api: Api,
+  chatId: number,
+  threadId: number,
+  text: string,
+): Promise<void> {
   // Telegram caps messages at 4096 chars; chunk longer outputs.
   const max = 4000;
   for (let i = 0; i < text.length; i += max) {
-    await api.sendMessage(chatId, text.slice(i, i + max));
+    await api.sendMessage(chatId, text.slice(i, i + max), { message_thread_id: threadId });
   }
 }
 
 export async function sendFile(
   api: Api,
   chatId: number,
+  threadId: number,
   absPath: string,
   kind: 'document' | 'photo',
   caption?: string,
 ): Promise<void> {
   const file = new InputFile(absPath);
-  if (kind === 'photo') await api.sendPhoto(chatId, file, caption ? { caption } : {});
-  else await api.sendDocument(chatId, file, caption ? { caption } : {});
+  const opts = { message_thread_id: threadId, ...(caption ? { caption } : {}) };
+  if (kind === 'photo') await api.sendPhoto(chatId, file, opts);
+  else await api.sendDocument(chatId, file, opts);
 }
 
-export function startTyping(api: Api, chatId: number): () => void {
-  const tick = () => api.sendChatAction(chatId, 'typing').catch(() => {});
+export function startTyping(api: Api, chatId: number, threadId: number): () => void {
+  const tick = () =>
+    api.sendChatAction(chatId, 'typing', { message_thread_id: threadId }).catch(() => {});
   tick();
   const h = setInterval(tick, 5000);
   return () => clearInterval(h);

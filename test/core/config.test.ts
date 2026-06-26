@@ -3,10 +3,10 @@ import path from 'path';
 import * as config from '../../src/core/config.js';
 
 describe('config', () => {
-  it('exposes the three channel ids as a record', () => {
-    expect(config.CHANNELS).toHaveProperty('personal');
-    expect(config.CHANNELS).toHaveProperty('academic');
-    expect(config.CHANNELS).toHaveProperty('work');
+  it('exposes the three channel topic ids as a record', () => {
+    expect(config.TOPICS).toHaveProperty('personal');
+    expect(config.TOPICS).toHaveProperty('academic');
+    expect(config.TOPICS).toHaveProperty('work');
   });
 
   it('HUB_DIR is absolute and defaults under the project root', () => {

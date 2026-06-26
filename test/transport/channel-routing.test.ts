@@ -1,17 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-describe('channelForChatId', () => {
+describe('channelForMessage', () => {
   afterEach(() => vi.resetModules());
 
-  it('maps configured chat ids to channel names and rejects others', async () => {
-    process.env.TELEGRAM_CHANNEL_PERSONAL = '111';
-    process.env.TELEGRAM_CHANNEL_ACADEMIC = '222';
-    process.env.TELEGRAM_CHANNEL_WORK = '333';
+  it('routes by (supergroup, topic) and rejects other chats/topics', async () => {
+    process.env.TELEGRAM_SUPERGROUP_ID = '-1009999';
+    process.env.TELEGRAM_TOPIC_PERSONAL = '11';
+    process.env.TELEGRAM_TOPIC_ACADEMIC = '22';
+    process.env.TELEGRAM_TOPIC_WORK = '33';
     vi.resetModules();
-    const { channelForChatId } = await import('../../src/transport/telegram.js');
-    expect(channelForChatId(111)).toBe('personal');
-    expect(channelForChatId('222')).toBe('academic');
-    expect(channelForChatId(333)).toBe('work');
-    expect(channelForChatId(999)).toBeNull();
+    const { channelForMessage } = await import('../../src/transport/telegram.js');
+
+    expect(channelForMessage('-1009999', 11)).toBe('personal');
+    expect(channelForMessage(-1009999, 22)).toBe('academic');
+    expect(channelForMessage('-1009999', 33)).toBe('work');
+    // right supergroup, unconfigured topic
+    expect(channelForMessage('-1009999', 99)).toBeNull();
+    // configured topic id but wrong chat
+    expect(channelForMessage('-1008888', 11)).toBeNull();
+    // no thread id (the supergroup's General topic)
+    expect(channelForMessage('-1009999', undefined)).toBeNull();
   });
 });

@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 describe('claude-config', () => {
   afterEach(() => vi.resetModules());
@@ -22,8 +25,18 @@ describe('claude-config', () => {
   it('requireOAuthToken throws a clear error when unset', async () => {
     const saved = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    const c = await import('../../src/agent/claude-config.js');
-    expect(() => c.requireOAuthToken()).toThrow(/CLAUDE_CODE_OAUTH_TOKEN/);
-    if (saved) process.env.CLAUDE_CODE_OAUTH_TOKEN = saved;
+    // requireOAuthToken falls back to reading <cwd>/.env. In deployment that file
+    // carries the token, so isolate the test by running from an empty temp dir.
+    const cwd = process.cwd();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icarus-oauth-'));
+    process.chdir(dir);
+    try {
+      const c = await import('../../src/agent/claude-config.js');
+      expect(() => c.requireOAuthToken()).toThrow(/CLAUDE_CODE_OAUTH_TOKEN/);
+    } finally {
+      process.chdir(cwd);
+      fs.rmSync(dir, { recursive: true, force: true });
+      if (saved) process.env.CLAUDE_CODE_OAUTH_TOKEN = saved;
+    }
   });
 });

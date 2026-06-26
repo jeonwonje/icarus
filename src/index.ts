@@ -8,7 +8,7 @@ import { getModelOptions, setClaudeModel } from './agent/claude-config.js';
 import type { TurnMeta } from './agent/types.js';
 import { openDb } from './db/db.js';
 import { logger } from './core/logger.js';
-import { CHANNELS, TELEGRAM_BOT_TOKEN } from './core/config.js';
+import { TOPICS, TELEGRAM_SUPERGROUP_ID, TELEGRAM_BOT_TOKEN } from './core/config.js';
 import { ChannelMutex } from './core/mutex.js';
 import { appendLogEntry } from './memory/log.js';
 import { listOutbox, removeOutboxFile } from './memory/outbox.js';
@@ -28,7 +28,7 @@ const pending = new Map<string, ChannelMessage[]>();
 async function drainOutbox(bot: Bot, msg: ChannelMessage): Promise<void> {
   for (const f of listOutbox(msg.channel)) {
     try {
-      await sendFile(bot.api, msg.chatId, f.absPath, f.kind, f.caption);
+      await sendFile(bot.api, msg.chatId, msg.threadId, f.absPath, f.kind, f.caption);
       removeOutboxFile(f);
     } catch (err) {
       logger.error({ channel: msg.channel, file: f.filename, err }, 'outbox send failed');
@@ -43,7 +43,7 @@ async function runTurn(bot: Bot, msg: ChannelMessage, promptOverride?: string): 
     senderId: msg.senderId,
     senderName: msg.senderName,
   };
-  const stopTyping = startTyping(bot.api, msg.chatId);
+  const stopTyping = startTyping(bot.api, msg.chatId, msg.threadId);
   try {
     let lastSent = '';
     let sentAny = false;
@@ -52,7 +52,7 @@ async function runTurn(bot: Bot, msg: ChannelMessage, promptOverride?: string): 
         lastSent = ev.result;
         sentAny = true;
         try {
-          await sendText(bot.api, msg.chatId, ev.result);
+          await sendText(bot.api, msg.chatId, msg.threadId, ev.result);
         } catch (err) {
           logger.error({ channel: msg.channel, err }, 'sendText failed');
         }
@@ -60,9 +60,14 @@ async function runTurn(bot: Bot, msg: ChannelMessage, promptOverride?: string): 
     });
 
     if (result.status === 'error') {
-      await sendText(bot.api, msg.chatId, `[agent error] ${result.error ?? 'unknown failure'}`);
+      await sendText(
+        bot.api,
+        msg.chatId,
+        msg.threadId,
+        `[agent error] ${result.error ?? 'unknown failure'}`,
+      );
     } else if (!sentAny && result.result) {
-      await sendText(bot.api, msg.chatId, result.result);
+      await sendText(bot.api, msg.chatId, msg.threadId, result.result);
     }
 
     await drainOutbox(bot, msg);
@@ -77,10 +82,10 @@ async function handleModelCommand(bot: Bot, msg: ChannelMessage): Promise<boolea
   const arg = (msg.commandArgs ?? '').trim();
   if (!arg) {
     const list = getModelOptions().map((o) => `- ${o.id} — ${o.label}`).join('\n');
-    await sendText(bot.api, msg.chatId, `Models:\n${list}\n\nUse /model <id> to switch.`);
+    await sendText(bot.api, msg.chatId, msg.threadId, `Models:\n${list}\n\nUse /model <id> to switch.`);
   } else {
     setClaudeModel(arg === 'default' ? null : arg);
-    await sendText(bot.api, msg.chatId, `Model set to ${arg}.`);
+    await sendText(bot.api, msg.chatId, msg.threadId, `Model set to ${arg}.`);
   }
   return true;
 }
@@ -115,9 +120,10 @@ async function onChannelMessage(bot: Bot, msg: ChannelMessage): Promise<void> {
 async function main(): Promise<void> {
   const missingKeys: string[] = [];
   if (!TELEGRAM_BOT_TOKEN) missingKeys.push('TELEGRAM_BOT_TOKEN');
-  if (!CHANNELS.personal) missingKeys.push('TELEGRAM_CHANNEL_PERSONAL');
-  if (!CHANNELS.academic) missingKeys.push('TELEGRAM_CHANNEL_ACADEMIC');
-  if (!CHANNELS.work) missingKeys.push('TELEGRAM_CHANNEL_WORK');
+  if (!TELEGRAM_SUPERGROUP_ID) missingKeys.push('TELEGRAM_SUPERGROUP_ID');
+  if (!TOPICS.personal) missingKeys.push('TELEGRAM_TOPIC_PERSONAL');
+  if (!TOPICS.academic) missingKeys.push('TELEGRAM_TOPIC_ACADEMIC');
+  if (!TOPICS.work) missingKeys.push('TELEGRAM_TOPIC_WORK');
   if (missingKeys.length > 0) {
     logger.fatal({ missingKeys }, `missing required config: ${missingKeys.join(', ')}`);
     process.exit(1);

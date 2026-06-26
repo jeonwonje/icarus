@@ -3,9 +3,10 @@ import { readEnvFile } from './env.js';
 
 const envConfig = readEnvFile([
   'TELEGRAM_BOT_TOKEN',
-  'TELEGRAM_CHANNEL_PERSONAL',
-  'TELEGRAM_CHANNEL_ACADEMIC',
-  'TELEGRAM_CHANNEL_WORK',
+  'TELEGRAM_SUPERGROUP_ID',
+  'TELEGRAM_TOPIC_PERSONAL',
+  'TELEGRAM_TOPIC_ACADEMIC',
+  'TELEGRAM_TOPIC_WORK',
   'CANVAS_API_TOKEN',
   'CANVAS_BASE_URL',
   'OUTLOOK_PST_PATH',
@@ -22,16 +23,19 @@ function fromEnv(key: string): string | undefined {
 export const PROJECT_ROOT = process.cwd();
 
 export const TELEGRAM_BOT_TOKEN = fromEnv('TELEGRAM_BOT_TOKEN') || '';
-export const TELEGRAM_CHANNEL_PERSONAL = fromEnv('TELEGRAM_CHANNEL_PERSONAL') || '';
-export const TELEGRAM_CHANNEL_ACADEMIC = fromEnv('TELEGRAM_CHANNEL_ACADEMIC') || '';
-export const TELEGRAM_CHANNEL_WORK = fromEnv('TELEGRAM_CHANNEL_WORK') || '';
+
+// One forum supergroup holds the three channels as forum topics. Messages are
+// routed by (supergroup chat id, message_thread_id) → channel.
+export const TELEGRAM_SUPERGROUP_ID = fromEnv('TELEGRAM_SUPERGROUP_ID') || '';
 
 export type ChannelName = 'personal' | 'academic' | 'work';
 
-export const CHANNELS: Record<ChannelName, string> = {
-  personal: TELEGRAM_CHANNEL_PERSONAL,
-  academic: TELEGRAM_CHANNEL_ACADEMIC,
-  work: TELEGRAM_CHANNEL_WORK,
+// channel name → forum topic thread id (kept as a string, matched against
+// the message's message_thread_id at runtime).
+export const TOPICS: Record<ChannelName, string> = {
+  personal: fromEnv('TELEGRAM_TOPIC_PERSONAL') || '',
+  academic: fromEnv('TELEGRAM_TOPIC_ACADEMIC') || '',
+  work: fromEnv('TELEGRAM_TOPIC_WORK') || '',
 };
 
 export const CANVAS_API_TOKEN = fromEnv('CANVAS_API_TOKEN') || '';

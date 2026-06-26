@@ -16,8 +16,8 @@ An always-on **Windows knowledge-agent service**. Icarus runs a [Claude Agent SD
 ## How it works
 
 ```
-Telegram (personal | academic | work)
-        │  (only configured chats are served)
+Telegram supergroup ── 3 forum topics (personal | academic | work)
+        │  (routed by message_thread_id; other topics ignored)
         ▼
   transport ──▶ per-channel turn ──▶ Claude Agent SDK (cwd = hub)
         ▲                                   │
@@ -38,7 +38,7 @@ See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for the full operator runbook. In short
 
 1. `claude setup-token` on the host; copy the token.
 2. `pwsh ./setup.ps1` — installs Node/Python/Git via winget, builds, creates the Python venv for document skills, installs the WinSW service.
-3. Fill in `.env` (copied from `.env.example`): Telegram bot token, the three channel chat IDs, Canvas creds, `OUTLOOK_PST_PATH`, and the OAuth token.
+3. Fill in `.env` (copied from `.env.example`): Telegram bot token, the supergroup chat ID + the three forum-topic thread IDs, Canvas creds, `OUTLOOK_PST_PATH`, and the OAuth token.
 4. Fill in `sources.config.json` (Canvas course IDs; Outlook folder/sender filters).
 5. `.\service\WinSW.exe start service\icarus.xml`.
 
