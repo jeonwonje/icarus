@@ -4,6 +4,8 @@ import {
   outlookFolderAllowed,
   outlookSenderAllowed,
   outlookAttachmentAllowed,
+  classifyOutlookSender,
+  outlookBlockReason,
   type SourcesConfig,
 } from '../../src/config/sources.js';
 
@@ -74,5 +76,54 @@ describe('outlookAttachmentAllowed', () => {
   it('drops non-document, non-image noise (p7m, mso, none)', () => {
     expect(outlookAttachmentAllowed(attCfg, { ext: 'p7m', contentId: '', mimeTag: '', sizeBytes: 5000 })).toBe(false);
     expect(outlookAttachmentAllowed(attCfg, { ext: '', contentId: '', mimeTag: '', sizeBytes: 5000 })).toBe(false);
+  });
+});
+
+const clsCfg: SourcesConfig = {
+  canvas: { courses: [], modules: [] },
+  outlook: {
+    senderAllow: [],
+    folderAllow: [],
+    folderBlock: ['Junk Email'],
+    attachmentKeepExt: ['pdf'],
+    attachmentMinImageKB: 50,
+    dropInlineImages: true,
+    senderBlockDomains: ['instructure.com', 'campuslabs.com', 'opal.so'],
+    senderBlockLocalparts: ['noreply', 'notifications', 'marketing'],
+    grayDomains: ['groups.nus.edu.sg', 'coursemology.org'],
+    triageEnabled: true,
+  },
+};
+
+describe('classifyOutlookSender', () => {
+  it('blocks by exact and suffix domain match', () => {
+    expect(classifyOutlookSender(clsCfg, { sender: 'notifications@instructure.com', isBulk: false })).toBe('block');
+    expect(classifyOutlookSender(clsCfg, { sender: 'x@relay.engage.campuslabs.com', isBulk: false })).toBe('block');
+  });
+  it('blocks by localpart token', () => {
+    expect(classifyOutlookSender(clsCfg, { sender: 'noreply@nus.edu.sg', isBulk: false })).toBe('block');
+  });
+  it('greys mailing-list prefixes and grayDomains', () => {
+    expect(classifyOutlookSender(clsCfg, { sender: 'hwb_nusstudents@groups.nus.edu.sg', isBulk: false })).toBe('gray');
+    expect(classifyOutlookSender(clsCfg, { sender: 'info@coursemology.org', isBulk: false })).toBe('gray');
+  });
+  it('greys a personal address only when a bulk signal is present', () => {
+    expect(classifyOutlookSender(clsCfg, { sender: 'friend@gmail.com', isBulk: false })).toBe('keep');
+    expect(classifyOutlookSender(clsCfg, { sender: 'friend@gmail.com', isBulk: true })).toBe('gray');
+  });
+  it('keeps internal Exchange X.500 senders (no domain)', () => {
+    expect(classifyOutlookSender(clsCfg, { sender: '/o=exchangelabs/ou=.../cn=abc', isBulk: false })).toBe('keep');
+  });
+  it('block wins over a bulk signal', () => {
+    expect(classifyOutlookSender(clsCfg, { sender: 'marketing@opal.so', isBulk: true })).toBe('block');
+  });
+});
+
+describe('outlookBlockReason', () => {
+  it('reports the matched domain', () => {
+    expect(outlookBlockReason(clsCfg, 'notifications@instructure.com')).toBe('blocklist:instructure.com');
+  });
+  it('reports the matched localpart token when no domain matched', () => {
+    expect(outlookBlockReason(clsCfg, 'noreply@nus.edu.sg')).toBe('blocklist:noreply');
   });
 });

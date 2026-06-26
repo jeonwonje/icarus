@@ -9,6 +9,10 @@
     "folderBlock": ["Junk Email"],
     "attachmentKeepExt": ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "csv", "txt", "md", "zip", "stl", "eml", "mp4"],
     "attachmentMinImageKB": 50,
-    "dropInlineImages": true
+    "dropInlineImages": true,
+    "senderBlockDomains": ["instructure.com", "csm.symplicity.com", "symplicity.com", "campuslabs.com", "examsoft.com", "autodeskcommunications.com", "opal.so"],
+    "senderBlockLocalparts": ["noreply", "no-reply", "donotreply", "notifications", "mailer", "bounce", "newsletter", "marketing", "alerts"],
+    "grayDomains": ["groups.nus.edu.sg", "coursemology.org"],
+    "triageEnabled": true
   }
 }
