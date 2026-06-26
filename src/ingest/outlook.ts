@@ -34,23 +34,33 @@ function fileExt(name: string): string {
   return m ? m[1].toLowerCase() : '';
 }
 
+/** Heuristic: true when transport headers mark the message as bulk/list/auto mail. */
+export function isBulkMessage(headers: string): boolean {
+  const h = (headers || '').toLowerCase();
+  return (
+    /list-unsubscribe/.test(h) ||
+    /precedence:\s*(bulk|list|junk)/.test(h) ||
+    /auto-submitted:\s*auto/.test(h)
+  );
+}
+
 function renderMessage(msg: PSTMessage, folder: string): string {
   const subject = msg.subject || '(no subject)';
   const from = senderOf(msg);
   const date = msg.clientSubmitTime ? msg.clientSubmitTime.toISOString() : '';
   const body = msg.body || msg.bodyRTF || '';
-  return [
+  let headers = '';
+  try { headers = msg.transportMessageHeaders || ''; } catch { /* default '' */ }
+  const lines = [
     `# ${subject}`,
     '',
     `- **From:** ${from}`,
     `- **Date:** ${date}`,
     `- **Folder:** ${folder}`,
-    '',
-    '---',
-    '',
-    body,
-    '',
-  ].join('\n');
+  ];
+  if (isBulkMessage(headers)) lines.push(`- **Bulk:** true`);
+  lines.push('', '---', '', body, '');
+  return lines.join('\n');
 }
 
 function extractAttachments(

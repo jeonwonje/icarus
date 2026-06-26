@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { messageFileName } from '../../src/ingest/outlook.js';
+import { messageFileName, isBulkMessage } from '../../src/ingest/outlook.js';
 
 describe('messageFileName', () => {
   it('produces a date-prefixed safe slug', () => {
@@ -18,5 +18,22 @@ describe('messageFileName', () => {
     expect(name.startsWith('undated_')).toBe(true);
     expect(name.endsWith('.md')).toBe(true);
     expect(name).not.toMatch(/[^A-Za-z0-9._-]/);
+  });
+});
+
+describe('isBulkMessage', () => {
+  it('flags List-Unsubscribe headers', () => {
+    expect(isBulkMessage('List-Unsubscribe: <mailto:x@y.com>')).toBe(true);
+  });
+  it('flags Precedence: bulk/list/junk', () => {
+    expect(isBulkMessage('Precedence: bulk')).toBe(true);
+    expect(isBulkMessage('precedence:   list')).toBe(true);
+  });
+  it('flags Auto-Submitted: auto-generated', () => {
+    expect(isBulkMessage('Auto-Submitted: auto-generated')).toBe(true);
+  });
+  it('returns false for ordinary mail and empty headers', () => {
+    expect(isBulkMessage('From: a@b.com\nTo: c@d.com')).toBe(false);
+    expect(isBulkMessage('')).toBe(false);
   });
 });
