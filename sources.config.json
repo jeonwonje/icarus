@@ -6,6 +6,9 @@
   "outlook": {
     "senderAllow": [],
     "folderAllow": [],
-    "folderBlock": ["Junk Email"]
+    "folderBlock": ["Junk Email"],
+    "attachmentKeepExt": ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "csv", "txt", "md", "zip", "stl", "eml", "mp4"],
+    "attachmentMinImageKB": 50,
+    "dropInlineImages": true
   }
 }

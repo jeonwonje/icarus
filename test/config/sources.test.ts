@@ -3,12 +3,32 @@ import {
   canvasCourseAllowed,
   outlookFolderAllowed,
   outlookSenderAllowed,
+  outlookAttachmentAllowed,
   type SourcesConfig,
 } from '../../src/config/sources.js';
 
 const cfg: SourcesConfig = {
   canvas: { courses: ['101', '202'], modules: [] },
-  outlook: { senderAllow: ['boss@uni.edu'], folderAllow: [], folderBlock: ['Junk Email'] },
+  outlook: {
+    senderAllow: ['boss@uni.edu'],
+    folderAllow: [],
+    folderBlock: ['Junk Email'],
+    attachmentKeepExt: ['pdf', 'docx', 'zip'],
+    attachmentMinImageKB: 50,
+    dropInlineImages: true,
+  },
+};
+
+const attCfg: SourcesConfig = {
+  canvas: { courses: [], modules: [] },
+  outlook: {
+    senderAllow: [],
+    folderAllow: [],
+    folderBlock: ['Junk Email'],
+    attachmentKeepExt: ['pdf', 'docx', 'zip'],
+    attachmentMinImageKB: 50,
+    dropInlineImages: true,
+  },
 };
 
 describe('sources allowlist', () => {
@@ -26,5 +46,33 @@ describe('sources allowlist', () => {
   it('outlook: senderAllow restricts when non-empty', () => {
     expect(outlookSenderAllowed(cfg, 'boss@uni.edu')).toBe(true);
     expect(outlookSenderAllowed(cfg, 'spam@x.com')).toBe(false);
+  });
+});
+
+describe('outlookAttachmentAllowed', () => {
+  it('keeps allow-list document extensions regardless of contentId', () => {
+    expect(outlookAttachmentAllowed(attCfg, { ext: 'pdf', contentId: '', mimeTag: '', sizeBytes: 1000 })).toBe(true);
+    expect(outlookAttachmentAllowed(attCfg, { ext: 'pdf', contentId: 'abc@x', mimeTag: '', sizeBytes: 1000 })).toBe(true);
+  });
+
+  it('drops inline (contentId) images when dropInlineImages is true', () => {
+    expect(outlookAttachmentAllowed(attCfg, { ext: 'png', contentId: 'cid1', mimeTag: 'image/png', sizeBytes: 999999 })).toBe(false);
+  });
+
+  it('keeps standalone images above the size threshold', () => {
+    expect(outlookAttachmentAllowed(attCfg, { ext: 'jpg', contentId: '', mimeTag: '', sizeBytes: 200 * 1024 })).toBe(true);
+  });
+
+  it('drops standalone images at or below the size threshold', () => {
+    expect(outlookAttachmentAllowed(attCfg, { ext: 'png', contentId: '', mimeTag: '', sizeBytes: 10 * 1024 })).toBe(false);
+  });
+
+  it('detects images by mimeTag when ext is missing', () => {
+    expect(outlookAttachmentAllowed(attCfg, { ext: '', contentId: '', mimeTag: 'image/jpeg', sizeBytes: 200 * 1024 })).toBe(true);
+  });
+
+  it('drops non-document, non-image noise (p7m, mso, none)', () => {
+    expect(outlookAttachmentAllowed(attCfg, { ext: 'p7m', contentId: '', mimeTag: '', sizeBytes: 5000 })).toBe(false);
+    expect(outlookAttachmentAllowed(attCfg, { ext: '', contentId: '', mimeTag: '', sizeBytes: 5000 })).toBe(false);
   });
 });

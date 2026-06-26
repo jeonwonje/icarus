@@ -11,15 +11,30 @@ export interface OutlookFilter {
   senderAllow: string[];
   folderAllow: string[];
   folderBlock: string[];
+  attachmentKeepExt: string[];
+  attachmentMinImageKB: number;
+  dropInlineImages: boolean;
 }
 export interface SourcesConfig {
   canvas: CanvasFilter;
   outlook: OutlookFilter;
 }
 
+const DEFAULT_KEEP_EXT = [
+  'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt',
+  'csv', 'txt', 'md', 'zip', 'stl', 'eml', 'mp4',
+];
+
 const DEFAULTS: SourcesConfig = {
   canvas: { courses: [], modules: [] },
-  outlook: { senderAllow: [], folderAllow: [], folderBlock: ['Junk Email'] },
+  outlook: {
+    senderAllow: [],
+    folderAllow: [],
+    folderBlock: ['Junk Email'],
+    attachmentKeepExt: DEFAULT_KEEP_EXT,
+    attachmentMinImageKB: 50,
+    dropInlineImages: true,
+  },
 };
 
 function arr(v: unknown): string[] {
@@ -43,6 +58,14 @@ export function loadSourcesConfig(file?: string): SourcesConfig {
       senderAllow: arr(outlook.senderAllow),
       folderAllow: arr(outlook.folderAllow),
       folderBlock: outlook.folderBlock === undefined ? ['Junk Email'] : arr(outlook.folderBlock),
+      attachmentKeepExt:
+        outlook.attachmentKeepExt === undefined
+          ? DEFAULT_KEEP_EXT
+          : arr(outlook.attachmentKeepExt).map((s) => s.toLowerCase()),
+      attachmentMinImageKB:
+        typeof outlook.attachmentMinImageKB === 'number' ? outlook.attachmentMinImageKB : 50,
+      dropInlineImages:
+        outlook.dropInlineImages === undefined ? true : Boolean(outlook.dropInlineImages),
     },
   };
 }
@@ -58,4 +81,29 @@ export function outlookFolderAllowed(cfg: SourcesConfig, folder: string): boolea
 
 export function outlookSenderAllowed(cfg: SourcesConfig, sender: string): boolean {
   return cfg.outlook.senderAllow.length === 0 || cfg.outlook.senderAllow.includes(sender);
+}
+
+const IMAGE_EXT = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tif', 'tiff', 'svg', 'jfif', 'heic',
+]);
+
+export interface AttachmentMeta {
+  ext: string;        // lowercased, no leading dot; '' if none
+  contentId: string;  // '' if none
+  mimeTag: string;    // '' if none
+  sizeBytes: number;
+}
+
+function isImageAttachment(a: AttachmentMeta): boolean {
+  return IMAGE_EXT.has(a.ext) || a.mimeTag.toLowerCase().startsWith('image/');
+}
+
+export function outlookAttachmentAllowed(cfg: SourcesConfig, a: AttachmentMeta): boolean {
+  // Real documents are always kept, even when embedded inline (cid invoices etc.).
+  if (a.ext && cfg.outlook.attachmentKeepExt.includes(a.ext)) return true;
+  if (isImageAttachment(a)) {
+    if (cfg.outlook.dropInlineImages && a.contentId) return false; // inline signature/screenshot
+    return a.sizeBytes > cfg.outlook.attachmentMinImageKB * 1024;   // standalone image, by size
+  }
+  return false; // p7m, mso, emz, unnamed blobs, everything else
 }
