@@ -55,4 +55,12 @@ COPY sources.config.json ./
 
 # PROJECT_ROOT = process.cwd() = /app; HUB_DIR defaults to /app/hub (bind-mounted).
 ENV NODE_ENV=production
+
+# The bundled Claude Code CLI refuses --dangerously-skip-permissions (which the
+# SDK passes for bypassPermissions mode) when running as root — UNLESS it knows
+# it's in a sandbox. A container is exactly that; IS_SANDBOX=1 is the sanctioned
+# escape hatch. We stay root (not the `node` user) on purpose: the hub is a
+# Windows bind mount where non-root uid mapping is unreliable, so root avoids
+# EACCES on the hub. Isolation comes from the container, not the in-container uid.
+ENV IS_SANDBOX=1
 CMD ["node", "dist/index.js"]
