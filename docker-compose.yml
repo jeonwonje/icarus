@@ -1,0 +1,22 @@
+services:
+  icarus:
+    build: .
+    image: icarus:latest
+    container_name: icarus
+    # Docker Desktop launches on login and restarts this unless you've stopped
+    # it explicitly — that's the auto-start path (replaces the WinSW service).
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Pin the hub inside the container regardless of any Windows HUB_DIR in
+      # .env. Bind-mounted below so it persists and stays visible on the host.
+      HUB_DIR: /app/hub
+    volumes:
+      # Hub: agent cwd + single source of truth. Lives on the host so you can
+      # see raw/, wiki/, index.md, log.md and the SQLite session state.
+      - ./hub:/app/hub
+      # Outlook .pst: produced by Windows Outlook on the host, read by the Linux
+      # container. Mount the folder that holds the daily export read-only.
+      # OUTLOOK_PST_DIR is read from .env (compose substitution); point
+      # OUTLOOK_PST_PATH at the file inside the container (/data/pst/<file>.pst).
+      - "${OUTLOOK_PST_DIR:-./pst}:/data/pst:ro"

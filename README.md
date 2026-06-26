@@ -1,6 +1,6 @@
 # Icarus
 
-An always-on **Windows knowledge-agent service**. Icarus runs a [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) agent whose working directory **is** a local file hub — its single source of truth. You talk to it over Telegram; it answers grounded on real files, never from thin air.
+An always-on **knowledge-agent service**, run in Docker on Windows. Icarus runs a [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) agent whose working directory **is** a local file hub — its single source of truth. You talk to it over Telegram; it answers grounded on real files, never from thin air.
 
 ## What it does
 
@@ -11,7 +11,7 @@ An always-on **Windows knowledge-agent service**. Icarus runs a [Claude Agent SD
   - **Outlook** — mail + attachments parsed from your daily `.pst` export.
 - **First-class documents.** Reads/writes `.docx`, `.pdf`, `.xlsx`, `.pptx` via vendored document skills. Images are read directly by the model's vision — no OCR.
 - **Self-healing inbox.** Files dropped into the hub (or sent over Telegram) are re-surfaced every turn until filed, so nothing is silently orphaned.
-- **Native Windows service.** Supervised by [WinSW](https://github.com/winsw/winsw): auto-starts on boot, restarts on failure. No Docker, no WSL.
+- **Dockerised, always-on.** Ships as a single container (`docker compose up -d`) with `restart: unless-stopped`; Docker Desktop launches it on login, so it survives reboots and crashes. The hub is bind-mounted so it stays visible on the host.
 
 ## How it works
 
@@ -36,11 +36,10 @@ The agent authenticates with your **Claude Code login** (`CLAUDE_CODE_OAUTH_TOKE
 
 See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for the full operator runbook. In short:
 
-1. `claude setup-token` on the host; copy the token.
-2. `pwsh ./setup.ps1` — installs Node/Python/Git via winget, builds, creates the Python venv for document skills, installs the WinSW service.
-3. Fill in `.env` (copied from `.env.example`): Telegram bot token, the supergroup chat ID + the three forum-topic thread IDs, Canvas creds, `OUTLOOK_PST_PATH`, and the OAuth token.
-4. Fill in `sources.config.json` (Canvas course IDs; Outlook folder/sender filters).
-5. `.\service\WinSW.exe start service\icarus.xml`.
+1. Install **Docker Desktop** (enable "start on login"); `claude setup-token` on the host and copy the token.
+2. `copy .env.example .env` and fill it in: Telegram bot token, the supergroup chat ID + the three forum-topic thread IDs, Canvas creds, the OAuth token, `OUTLOOK_PST_DIR` (host folder with the `.pst`) and `OUTLOOK_PST_PATH` (its path inside the container).
+3. Fill in `sources.config.json` (Canvas course IDs; Outlook folder/sender filters).
+4. `docker compose up -d --build`.
 
 ## Configuration
 
@@ -51,7 +50,7 @@ See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for the full operator runbook. In short
 
 ## Tech stack
 
-Node + TypeScript (ESM), `@anthropic-ai/claude-agent-sdk`, `grammy` (Telegram), `better-sqlite3`, `pino`, `pst-extractor`. Document skills use a project-local Python venv. WinSW for service supervision.
+Node + TypeScript (ESM), `@anthropic-ai/claude-agent-sdk`, `grammy` (Telegram), `better-sqlite3`, `pino`, `pst-extractor`. Packaged as a Docker image (`node:22-bookworm-slim`) bundling the document toolchain — LibreOffice, pandoc, qpdf, and a Python venv (python-docx, openpyxl, python-pptx, pdfplumber, pypdf, pypdfium2). `docker compose` with `restart: unless-stopped` for supervision.
 
 ## Development
 

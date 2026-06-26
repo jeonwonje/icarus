@@ -1,0 +1,30 @@
+# Build context hygiene — keep the image lean and never leak host state/secrets.
+
+# Secrets (passed at runtime via env_file, never baked into the image)
+.env
+
+# Local knowledge base / machine state (bind-mounted at runtime, not built in)
+hub/
+pst/
+
+# Node — reinstalled in the builder from package-lock.json
+node_modules/
+dist/
+*.log
+
+# Python — venv is built fresh inside the image
+.venv/
+__pycache__/
+*.pyc
+
+# Windows-native service bits (no longer used under Docker)
+service/
+setup.ps1
+
+# Repo metadata / docs not needed at build time.
+# NOTE: don't blanket-ignore *.md — skills/**/SKILL.md must reach the image.
+.git/
+.gitignore
+.superpowers/
+docs/
+README.md

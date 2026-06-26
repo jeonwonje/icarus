@@ -4,6 +4,9 @@
 # Local knowledge base / machine state
 hub/
 
+# Default host mount point for the Outlook .pst (when OUTLOOK_PST_DIR is unset)
+pst/
+
 # Node
 node_modules/
 dist/
@@ -13,12 +16,6 @@ dist/
 .venv/
 __pycache__/
 *.pyc
-
-# Service binary (downloaded, not versioned content)
-src/service/WinSW.exe
-
-# WinSW binary (downloaded by setup.ps1, not versioned)
-service/WinSW.exe
 
 # SDD scratch (briefs, reports, review diffs)
 .superpowers/
