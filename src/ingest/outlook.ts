@@ -10,8 +10,11 @@ import {
   outlookFolderAllowed,
   outlookSenderAllowed,
   outlookAttachmentAllowed,
+  classifyOutlookSender,
+  outlookBlockReason,
   type SourcesConfig,
 } from '../config/sources.js';
+import { triageGray, type Verdict } from './outlook-triage.js';
 import { rawOutlookDir } from '../memory/scaffold.js';
 import { sanitizeFileName } from '../core/slug.js';
 import { logger } from '../core/logger.js';
@@ -44,7 +47,7 @@ export function isBulkMessage(headers: string): boolean {
   );
 }
 
-function renderMessage(msg: PSTMessage, folder: string): string {
+function renderMessage(msg: PSTMessage, folder: string, filteredReason?: string): string {
   const subject = msg.subject || '(no subject)';
   const from = senderOf(msg);
   const date = msg.clientSubmitTime ? msg.clientSubmitTime.toISOString() : '';
@@ -58,6 +61,7 @@ function renderMessage(msg: PSTMessage, folder: string): string {
     `- **Date:** ${date}`,
     `- **Folder:** ${folder}`,
   ];
+  if (filteredReason) lines.push(`- **Filtered:** ${filteredReason}`);
   if (isBulkMessage(headers)) lines.push(`- **Bulk:** true`);
   lines.push('', '---', '', body, '');
   return lines.join('\n');
@@ -120,11 +124,78 @@ function extractAttachments(
   }
 }
 
+export interface GrayRef {
+  id: string;
+  sender: string;
+  subject: string;
+  file: string; // current path inside _graytriage
+}
+interface TriageCounters {
+  kept: number;
+  filteredBlock: number;
+  filteredLlm: number;
+  gray: number;
+  attachments: number;
+  skipped: number;
+}
+interface TriageDirs {
+  destDir: string;
+  filteredDir: string;
+  graytriageDir: string;
+}
+
+/** Insert a `- **Filtered:** <reason>` line right after the Folder line. */
+export function injectFilteredLine(content: string, reason: string): string {
+  const lines = content.split('\n');
+  const idx = lines.findIndex((l) => l.startsWith('- **Folder:**'));
+  if (idx < 0) return content;
+  lines.splice(idx + 1, 0, `- **Filtered:** ${reason}`);
+  return lines.join('\n');
+}
+
+/** Move each parked gray file to dest (keep) or filtered (junk); remove _graytriage if empty. */
+export function applyTriageVerdicts(
+  gray: GrayRef[],
+  verdicts: Map<string, Verdict>,
+  dirs: TriageDirs,
+  counters: TriageCounters,
+): void {
+  for (const g of gray) {
+    const name = path.basename(g.file);
+    const verdict = verdicts.get(g.id) ?? 'keep';
+    try {
+      if (verdict === 'junk') {
+        const content = fs.readFileSync(g.file, 'utf-8');
+        fs.mkdirSync(dirs.filteredDir, { recursive: true });
+        fs.writeFileSync(path.join(dirs.filteredDir, name), injectFilteredLine(content, 'llm:junk'));
+        fs.unlinkSync(g.file);
+        counters.filteredLlm++;
+      } else {
+        fs.mkdirSync(dirs.destDir, { recursive: true });
+        fs.renameSync(g.file, path.join(dirs.destDir, name));
+        counters.kept++;
+      }
+    } catch (err) {
+      logger.warn({ err, file: g.file }, 'outlook triage: move failed, leaving file in _graytriage (counted kept)');
+      counters.kept++;
+    }
+  }
+  try {
+    if (fs.existsSync(dirs.graytriageDir) && fs.readdirSync(dirs.graytriageDir).length === 0) {
+      fs.rmdirSync(dirs.graytriageDir);
+    }
+  } catch (err) {
+    logger.warn({ err, dir: dirs.graytriageDir }, 'outlook triage: could not remove _graytriage');
+  }
+}
+
 function walkFolder(
   folder: PSTFolder,
   cfg: SourcesConfig,
-  destDir: string,
-  counters: { written: number; attachments: number; skipped: number },
+  dirs: TriageDirs,
+  attachmentsDir: string,
+  counters: TriageCounters,
+  gray: GrayRef[],
 ): void {
   const folderName = folder.displayName || 'Unknown';
   const folderAllowed = outlookFolderAllowed(cfg, folderName);
@@ -136,14 +207,33 @@ function walkFolder(
         const sender = senderOf(msg);
         if (outlookSenderAllowed(cfg, sender)) {
           const date = msg.clientSubmitTime ? msg.clientSubmitTime.toISOString() : '';
-          const file = path.join(destDir, messageFileName(msg.subject || '', date));
-          fs.mkdirSync(destDir, { recursive: true });
-          fs.writeFileSync(file, renderMessage(msg, folderName));
-          counters.written++;
+          const name = messageFileName(msg.subject || '', date);
+          const stem = name.replace(/\.md$/, '');
 
-          const attachmentsDir = path.join(rawOutlookDir(), 'attachments');
-          const messageStem = messageFileName(msg.subject || '', date).replace(/\.md$/, '');
-          extractAttachments(msg, attachmentsDir, counters, messageStem, cfg);
+          let headers = '';
+          try { headers = msg.transportMessageHeaders || ''; } catch { /* default '' */ }
+          const verdict = classifyOutlookSender(cfg, { sender, isBulk: isBulkMessage(headers) });
+
+          if (verdict === 'block') {
+            fs.mkdirSync(dirs.filteredDir, { recursive: true });
+            fs.writeFileSync(
+              path.join(dirs.filteredDir, name),
+              renderMessage(msg, folderName, outlookBlockReason(cfg, sender)),
+            );
+            counters.filteredBlock++;
+          } else if (verdict === 'gray') {
+            fs.mkdirSync(dirs.graytriageDir, { recursive: true });
+            const file = path.join(dirs.graytriageDir, name);
+            fs.writeFileSync(file, renderMessage(msg, folderName));
+            gray.push({ id: `g${gray.length}`, sender, subject: msg.subject || '', file });
+            counters.gray++;
+          } else {
+            fs.mkdirSync(dirs.destDir, { recursive: true });
+            fs.writeFileSync(path.join(dirs.destDir, name), renderMessage(msg, folderName));
+            counters.kept++;
+          }
+
+          extractAttachments(msg, attachmentsDir, counters, stem, cfg);
         }
       }
       msg = folder.getNextChild() as PSTMessage | null;
@@ -152,7 +242,7 @@ function walkFolder(
 
   if (folder.hasSubfolders) {
     for (const sub of folder.getSubFolders()) {
-      walkFolder(sub, cfg, destDir, counters);
+      walkFolder(sub, cfg, dirs, attachmentsDir, counters, gray);
     }
   }
 }
@@ -163,15 +253,43 @@ export async function main(): Promise<void> {
     throw new Error(`No .pst export found at ${OUTLOOK_PST_PATH}`);
   }
   const cfg = loadSourcesConfig();
+  const destDir = rawOutlookDir();
+  const dirs: TriageDirs = {
+    destDir,
+    filteredDir: path.join(destDir, '_filtered'),
+    graytriageDir: path.join(destDir, '_graytriage'),
+  };
+  const attachmentsDir = path.join(destDir, 'attachments');
+  const counters: TriageCounters = {
+    kept: 0, filteredBlock: 0, filteredLlm: 0, gray: 0, attachments: 0, skipped: 0,
+  };
+  const gray: GrayRef[] = [];
+
   const pst = new PSTFile(OUTLOOK_PST_PATH);
-  const counters = { written: 0, attachments: 0, skipped: 0 };
-  walkFolder(pst.getRootFolder(), cfg, rawOutlookDir(), counters);
+  walkFolder(pst.getRootFolder(), cfg, dirs, attachmentsDir, counters, gray);
+
+  const verdicts = await triageGray(
+    gray.map((g) => ({ id: g.id, sender: g.sender, subject: g.subject })),
+    { enabled: cfg.outlook.triageEnabled },
+  );
+  applyTriageVerdicts(gray, verdicts, dirs, counters);
+
   logger.info(
-    { written: counters.written, attachments: counters.attachments, skipped: counters.skipped },
+    {
+      kept: counters.kept,
+      filteredBlock: counters.filteredBlock,
+      filteredLlm: counters.filteredLlm,
+      gray: counters.gray,
+      attachments: counters.attachments,
+      skipped: counters.skipped,
+    },
     'outlook ingest complete',
   );
   process.stdout.write(
-    `Outlook ingest complete: ${counters.written} messages, ${counters.attachments} attachments kept, ${counters.skipped} skipped.\n`,
+    `Outlook ingest complete: ${counters.kept} kept, ` +
+      `${counters.filteredBlock + counters.filteredLlm} filtered ` +
+      `(${counters.filteredBlock} blocklist + ${counters.filteredLlm} llm-junk), ` +
+      `${counters.gray} gray-triaged, ${counters.attachments} attachments kept, ${counters.skipped} skipped.\n`,
   );
 }
 

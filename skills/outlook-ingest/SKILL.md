@@ -15,16 +15,15 @@ node "$ICARUS_HOME/dist/ingest/outlook.js"
 (If `dist/` is absent, use
 `npx --prefix "$ICARUS_HOME" tsx "$ICARUS_HOME/src/ingest/outlook.ts"`.)
 
-This reads the daily `.pst` export at `OUTLOOK_PST_PATH`, applies the
-folder/sender allow- and block-lists in `$ICARUS_HOME/sources.config.json`
-(Junk is skipped by default), and writes one markdown file per message under
-`raw/outlook/`. Attachments are
-filtered per `sources.config.json` (`attachmentKeepExt`, `attachmentMinImageKB`,
-`dropInlineImages`): inline signature/embedded images and non-document noise are
-dropped; real documents and large standalone images are kept under
-`raw/outlook/attachments/`. It prints a summary line of the form
-`N messages, K attachments kept, S skipped`.
+This reads the daily `.pst` export at `OUTLOOK_PST_PATH` and classifies each message
+using `$ICARUS_HOME/sources.config.json`: confident automated junk (block-list senders)
+and Haiku-triaged junk go to `raw/outlook/_filtered/`; ambiguous bulk-ish mail is judged
+by a cheap model; everything else (personal/human mail) is written to `raw/outlook/`.
+Junk is quarantined, never deleted. Attachments are filtered per the attachment rules.
+It prints a summary of the form:
+`N kept, F filtered (B blocklist + L llm-junk), G gray-triaged, A attachments kept, S skipped`.
 
-After it finishes, file the new messages into `wiki/` as needed and update
-`index.md`, citing each `raw/outlook/...` path. If the export is missing or the
-command fails, report the error; do not retry blindly.
+After it finishes, file the new `raw/outlook/` messages into `wiki/` as needed and update
+`index.md`, citing each `raw/outlook/...` path. Ignore `raw/outlook/_filtered/` unless the
+user explicitly asks about filtered/junk mail. If the export is missing or the command
+fails, report the error; do not retry blindly.
