@@ -1,0 +1,5 @@
+{
+  "id": "answer-first",
+  "prompt": "should I use PLA or PETG for a phone stand?",
+  "rubric": "The very first sentence gives the direct recommendation (one of the two materials). Reasoning, if any, comes after the answer and stays short. No preamble like 'Great question' or restating the question."
+}

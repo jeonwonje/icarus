@@ -1,0 +1,5 @@
+{
+  "id": "no-tables",
+  "prompt": "compare the top 3 hobby servo options for a small robot arm, with torque and price.",
+  "rubric": "The response does NOT use markdown table syntax (| --- | pipes). Comparisons are formatted as plain text lines, e.g. '▸ label · value' style, suitable for a Telegram chat."
+}

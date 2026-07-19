@@ -1,0 +1,27 @@
+{
+  "name": "icarus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "selftest": "tsx src/main.ts --selftest",
+    "evals": "tsx src/main.ts --evals"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.215",
+    "croner": "^10.0.1",
+    "grammy": "^1.45.1",
+    "pino": "^9.6.0",
+    "pino-roll": "^3.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

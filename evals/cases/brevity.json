@@ -1,0 +1,5 @@
+{
+  "id": "brevity",
+  "prompt": "what's the difference between a li-ion and a sodium-ion cell?",
+  "rubric": "The response is brief (under ~8 lines), answers in the first sentence, and does not use markdown headers or a long bulleted essay. Plain, direct, KISS."
+}
