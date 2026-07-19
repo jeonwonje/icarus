@@ -25,10 +25,13 @@ interface ChatBuffer {
 }
 
 let client: TelegramClient | null = null;
-let connected = false;
+let authorized = false;
 const buffers = new Map<string, ChatBuffer>();
 
-export const userbotConnected = (): boolean => connected;
+/** Live check: authorized at boot AND the underlying MTProto connection is currently up
+ *  (TelegramBaseClient.connected — node_modules/telegram/client/telegramBaseClient.d.ts:199,
+ *  `get connected(): boolean | undefined`). */
+export const userbotConnected = (): boolean => !!(authorized && client?.connected);
 
 export function getWhitelist(): { id: string; title: string }[] {
   try {
@@ -48,7 +51,7 @@ export function toggleWhitelist(id: string, title: string): boolean {
 }
 
 export async function listDialogs(): Promise<{ id: string; title: string }[]> {
-  if (!client || !connected) throw new Error('userbot not connected');
+  if (!client || !userbotConnected()) throw new Error('userbot not connected');
   const dialogs = await client.getDialogs({ limit: 20 });
   return dialogs
     .filter((d) => d.id != null)
@@ -62,14 +65,14 @@ export async function startUserbot(): Promise<void> {
   });
   await client.connect();
   if (!(await client.checkAuthorization())) {
-    connected = false;
+    authorized = false;
     if (getSetting('tg_auth_alerted') !== cfg.tgSession.slice(0, 16)) {
       setSetting('tg_auth_alerted', cfg.tgSession.slice(0, 16));
       await sendOwner('⚠ telegram userbot session is dead — run `npm run tg-login` and update TG_SESSION, then /restart.');
     }
     return;
   }
-  connected = true;
+  authorized = true;
   client.addEventHandler((e: NewMessageEvent) => void onNewMessage(e).catch((err) => log.warn({ err: String(err) }, 'tg handler failed')), new NewMessage({}));
   setInterval(sweep, 30_000);
   log.info('telegram userbot connected');
@@ -84,7 +87,12 @@ async function onNewMessage(event: NewMessageEvent): Promise<void> {
   const itemId = `${chatId}:${msg.id}`;
   if (isProcessed('tg', itemId)) return; // gramJS can redeliver on reconnect catch-up
   markProcessed('tg', itemId);
-  const buf = buffers.get(chatId) ?? { title: entry.title, slug: slugify(entry.title), items: [], lastMsgAt: 0 };
+  const buf = buffers.get(chatId) ?? {
+    title: entry.title,
+    slug: `${slugify(entry.title)}-${chatId.replace(/^-/, '')}`,
+    items: [],
+    lastMsgAt: 0,
+  };
   buffers.set(chatId, buf);
 
   let sender = 'unknown';
@@ -158,9 +166,9 @@ function flush(chatId: string): void {
   const dir = path.join(cfg.inboxDir, 'connectors', 'telegram', buf.slug);
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${day}.md`);
-  appendFileSync(file, renderTgBatchMd(items));
-  setSetting('tg_last_flush', `${now()} · ${buf.title}`);
   const batch = renderTgBatchMd(items);
+  appendFileSync(file, batch);
+  setSetting('tg_last_flush', `${now()} · ${buf.title}`);
   const context = existsSync(file) ? tail(readFileSync(file, 'utf8'), 40) : '';
   enqueueTriage(buf.title, file, batch, context);
 }
