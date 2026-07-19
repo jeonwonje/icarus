@@ -17,6 +17,7 @@ export interface TurnJob {
   kind: string; // 'chat' | 'job:<name>' | 'eval'
   lines: TurnLine[];
   capMs?: number;
+  browser?: boolean; // give this turn the browser MCP server (triage jobs only)
   onText?: (text: string) => void;
   onDone?: (result: TurnResult) => void;
   enqueuedAt: number;

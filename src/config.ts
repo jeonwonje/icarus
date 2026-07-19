@@ -26,9 +26,26 @@ const Env = z.object({
   CLAUDE_CODE_OAUTH_TOKEN: SELFTEST ? z.string().default('selftest') : z.string().min(10),
   ICARUS_MODEL: z.string().default('sonnet'),
   ICARUS_TZ: z.string().optional(),
+  ICARUS_MAIL_DROP: z.string().optional(),
+  ICARUS_BROWSER_MCP: z.string().optional(),
 });
 
 const env = Env.parse(process.env);
+
+const BrowserMcp = z.object({
+  command: z.string(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+});
+
+function parseBrowserMcp(raw: string | undefined) {
+  if (!raw) return undefined;
+  try {
+    return BrowserMcp.parse(JSON.parse(raw));
+  } catch (e) {
+    throw new Error(`ICARUS_BROWSER_MCP is not valid JSON {command,args?,env?}: ${String(e).slice(0, 200)}`);
+  }
+}
 
 export const cfg = {
   selftest: SELFTEST,
@@ -37,6 +54,8 @@ export const cfg = {
   oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN,
   defaultModel: env.ICARUS_MODEL,
   tz: env.ICARUS_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
+  mailDropDir: env.ICARUS_MAIL_DROP || undefined,
+  browserMcp: parseBrowserMcp(env.ICARUS_BROWSER_MCP),
 
   desktopDir: DESKTOP,
   wikiDir: path.join(DESKTOP, 'wiki'),
