@@ -88,19 +88,32 @@ export async function pollMailDrop(): Promise<void> {
     }
     for (const name of names) {
       const p = path.join(dir, name);
-      const st = statSync(p);
+      let st: ReturnType<typeof statSync>;
+      try {
+        st = statSync(p);
+      } catch (e) {
+        log.warn({ err: String(e), name }, 'mail export vanished before stat — skipping this poll');
+        continue;
+      }
       const prev = pollState.get(name);
       pollState.set(name, { size: st.size, mtimeMs: st.mtimeMs });
       const ready = prev && prev.size === st.size && prev.mtimeMs === st.mtimeMs;
       if (!ready) continue; // still syncing (or first sighting) — next poll decides
       const sig = fileSignature(name, st.size, st.mtimeMs);
       if (isProcessed('mail-file', sig)) continue;
-      const newFiles = extractNewMessages(p);
+      // Always attempted-once: mark processed and record settings regardless of outcome, so a
+      // poison export (throws partway through) can't be re-parsed and re-DMed every 5 minutes.
+      const result = extractNewMessages(p);
       markProcessed('mail-file', sig);
       setSetting('mail_last_export_at', now());
-      setSetting('mail_last_parse', `${now()} · ${newFiles.length} new`);
-      log.info({ pst: name, newMessages: newFiles.length }, 'mail export parsed');
-      if (newFiles.length > 0) enqueueTriage(newFiles);
+      setSetting('mail_last_parse', `${now()} · ${result.files.length} new`);
+      log.info({ pst: name, newMessages: result.files.length, error: result.error }, 'mail export parsed');
+      if (result.error) {
+        await sendOwner(
+          `mail export ${name} parsed with errors: ${result.error.slice(0, 200)} — salvaged ${result.files.length} new message(s); this export won't be retried.`,
+        );
+      }
+      if (result.files.length > 0) enqueueTriage(result.files);
     }
     checkStall();
   } catch (e) {
@@ -120,28 +133,42 @@ function checkStall(): void {
 
 // ---- extraction ------------------------------------------------------------
 
-/** Walk the PST, write never-seen messages + attachments to the inbox, return new file paths. */
-function extractNewMessages(pstPath: string): string[] {
-  const pst = new PSTFile(pstPath);
+/** Walk the PST, write never-seen messages + attachments to the inbox, return new file paths.
+ *  Catches internally so whatever was salvaged before a throw is still returned — the caller
+ *  marks the export processed exactly once (error or not) rather than retrying it forever. */
+function extractNewMessages(pstPath: string): { files: string[]; error?: string } {
   const written: string[] = [];
-  walkFolder(pst.getRootFolder(), written);
-  return written;
+  try {
+    const pst = new PSTFile(pstPath);
+    walkFolder(pst.getRootFolder(), written);
+    return { files: written };
+  } catch (e) {
+    return { files: written, error: String(e) };
+  }
 }
 
 function walkFolder(folder: PSTFolder, written: string[]): void {
-  if (folder.hasSubfolders) for (const sub of folder.getSubFolders()) walkFolder(sub, written);
+  try {
+    if (folder.hasSubfolders) for (const sub of folder.getSubFolders()) walkFolder(sub, written);
+  } catch (e) {
+    log.warn({ err: String(e) }, 'skipping subfolder listing — abandoning this branch');
+  }
   if (folder.contentCount <= 0) return;
-  let child = folder.getNextChild();
-  while (child) {
-    if (child instanceof PSTMessage && child.messageClass.startsWith('IPM.Note')) {
-      try {
-        const p = writeMessage(child);
-        if (p) written.push(p);
-      } catch (e) {
-        log.warn({ err: String(e), subject: child.subject }, 'skipping unparseable message');
+  try {
+    let child = folder.getNextChild();
+    while (child) {
+      if (child instanceof PSTMessage && child.messageClass.startsWith('IPM.Note')) {
+        try {
+          const p = writeMessage(child);
+          if (p) written.push(p);
+        } catch (e) {
+          log.warn({ err: String(e), subject: child.subject }, 'skipping unparseable message');
+        }
       }
+      child = folder.getNextChild();
     }
-    child = folder.getNextChild();
+  } catch (e) {
+    log.warn({ err: String(e) }, 'folder cursor failed — abandoning this folder');
   }
 }
 
@@ -173,13 +200,14 @@ function writeMessage(msg: PSTMessage): string | null {
 
 function writeAttachments(msg: PSTMessage, dir: string): void {
   for (let i = 0; i < msg.numberOfAttachments; i++) {
+    let out: ReturnType<typeof createWriteStream> | null = null;
     try {
       const att = msg.getAttachment(i);
       const stream = att.fileInputStream;
       if (!stream) continue;
       mkdirSync(dir, { recursive: true });
       const name = sanitize(att.longFilename || att.filename || `attachment-${i}`);
-      const out = createWriteStream(path.join(dir, name));
+      out = createWriteStream(path.join(dir, name));
       const buffer = Buffer.alloc(8176);
       let bytesRead: number;
       do {
@@ -188,6 +216,7 @@ function writeAttachments(msg: PSTMessage, dir: string): void {
       } while (bytesRead === buffer.length);
       out.end();
     } catch (e) {
+      out?.destroy(); // avoid leaking the fd if readBlock threw mid-stream
       log.warn({ err: String(e), i }, 'attachment extraction failed');
     }
   }
@@ -196,11 +225,19 @@ function writeAttachments(msg: PSTMessage, dir: string): void {
 // ---- triage ----------------------------------------------------------------
 
 function enqueueTriage(files: string[]): void {
+  const MAX_LISTED = 100;
+  const listed = files.slice(0, MAX_LISTED);
+  const extra = files.length - MAX_LISTED;
+  const extraLine = extra > 0 ? `\n…and ${extra} more in the same directories` : '';
+  const bulkNote =
+    extra > 0
+      ? `\n\nThis is likely a large/historical import — prioritize the most recent dates and clearly urgent subjects, roll the rest into one backlog summary line in the digest, and say explicitly what was skimmed vs read.`
+      : '';
   const prompt = `You are running the mail triage job. ${files.length} new email(s) landed as markdown files (attachments in sibling "-att" dirs):
 
-${files.map((f) => `- ${f}`).join('\n')}
+${listed.map((f) => `- ${f}`).join('\n')}${extraLine}
 
-Read EVERY file. Discard spam/noise silently. For anything real, actually investigate: follow links (browser tools are available for pages WebFetch can't handle), read attachments and images, extract deadlines, actions, and amounts. Record durable facts in your memory directory. For hard deadlines, surface them prominently in the digest (calendar integration comes later).
+Read EVERY file. Discard spam/noise silently. For anything real, actually investigate: follow links (browser tools are available for pages WebFetch can't handle), read attachments and images, extract deadlines, actions, and amounts. Record durable facts in your memory directory. For hard deadlines, surface them prominently in the digest (calendar integration comes later).${bulkNote}
 
 Your final reply is DMed to Jeon as the mail digest.
 
