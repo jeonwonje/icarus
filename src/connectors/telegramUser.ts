@@ -21,6 +21,7 @@ interface ChatBuffer {
   title: string;
   slug: string;
   items: TgItem[];
+  itemIds: string[]; // parallel to items — marked processed only once flushed to disk
   lastMsgAt: number;
 }
 
@@ -86,11 +87,12 @@ async function onNewMessage(event: NewMessageEvent): Promise<void> {
   const msg = event.message;
   const itemId = `${chatId}:${msg.id}`;
   if (isProcessed('tg', itemId)) return; // gramJS can redeliver on reconnect catch-up
-  markProcessed('tg', itemId);
+  // markProcessed happens at flush time, once the batch is safely on disk — see flush().
   const buf = buffers.get(chatId) ?? {
     title: entry.title,
     slug: `${slugify(entry.title)}-${chatId.replace(/^-/, '')}`,
     items: [],
+    itemIds: [],
     lastMsgAt: 0,
   };
   buffers.set(chatId, buf);
@@ -111,6 +113,7 @@ async function onNewMessage(event: NewMessageEvent): Promise<void> {
     mediaNote = await downloadMedia(msg, buf.slug);
   }
   buf.items.push({ ts: new Date((msg.date ?? Math.floor(Date.now() / 1000)) * 1000).toISOString(), sender, text, mediaNote });
+  buf.itemIds.push(itemId);
   buf.lastMsgAt = Date.now();
   if (buf.items.length >= MAX_BATCH) flush(chatId);
 }
@@ -158,19 +161,30 @@ function sweep(): void {
   }
 }
 
-function flush(chatId: string): void {
+function flush(chatId: string, opts?: { enqueue?: boolean }): void {
+  const enqueue = opts?.enqueue ?? true;
   const buf = buffers.get(chatId);
   if (!buf || buf.items.length === 0) return;
   const items = buf.items.splice(0, buf.items.length);
+  const itemIds = buf.itemIds.splice(0, buf.itemIds.length);
   const day = new Date().toISOString().slice(0, 10);
   const dir = path.join(cfg.inboxDir, 'connectors', 'telegram', buf.slug);
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${day}.md`);
   const batch = renderTgBatchMd(items);
   appendFileSync(file, batch);
+  for (const itemId of itemIds) markProcessed('tg', itemId);
   setSetting('tg_last_flush', `${now()} · ${buf.title}`);
+  if (!enqueue) return;
   const context = existsSync(file) ? tail(readFileSync(file, 'utf8'), 40) : '';
   enqueueTriage(buf.title, file, batch, context);
+}
+
+/** Flush every pending buffer without enqueueing triage turns — for use on shutdown, where the
+ *  raw log + processed-marks are what matter and the process won't be around for a triage reply.
+ *  No-op if the userbot never started (buffers stays empty). */
+export function flushAllBuffers(): void {
+  for (const chatId of buffers.keys()) flush(chatId, { enqueue: false });
 }
 
 const tail = (s: string, n: number) => s.trimEnd().split('\n').slice(-n).join('\n');

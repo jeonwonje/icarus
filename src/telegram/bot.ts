@@ -10,7 +10,7 @@ import { clearSession, getSession } from '../agent/sessions.js';
 import { decideProposal, latestPending, listPersonaCommits, revertCommit } from '../improve/proposals.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
 import { saveIncomingFile } from './files.js';
-import { userbotConnected, getWhitelist, listDialogs, toggleWhitelist } from '../connectors/telegramUser.js';
+import { userbotConnected, getWhitelist, listDialogs, toggleWhitelist, flushAllBuffers } from '../connectors/telegramUser.js';
 import { sendOwner, sendOwnerDocument, sendOwnerKeyboard, sendOwnerEphemeral, deleteOwnerMessage, startTyping } from './send.js';
 import {
   fileActionKeyboard,
@@ -380,6 +380,7 @@ export function createBot(): Bot {
 
   bot.command('restart', async (ctx) => {
     await ctx.reply('restarting…');
+    flushAllBuffers();
     writeFileSync(cfg.shutdownMarker, now());
     setTimeout(() => process.exit(0), 500);
   });

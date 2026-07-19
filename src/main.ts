@@ -125,8 +125,12 @@ process.on('unhandledRejection', (e) => {
   process.exit(1);
 });
 process.on('SIGINT', () => {
-  writeFileSync(cfg.shutdownMarker, now());
-  process.exit(0);
+  void (async () => {
+    const { flushAllBuffers } = await import('./connectors/telegramUser.js');
+    flushAllBuffers();
+    writeFileSync(cfg.shutdownMarker, now());
+    process.exit(0);
+  })();
 });
 
 // ---- boot -----------------------------------------------------------------
