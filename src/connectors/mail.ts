@@ -250,7 +250,14 @@ ${DIGEST_STYLE}`;
     capMs: cfg.reflectionCapMs,
     browser: true,
     onDone: (res) => {
-      const body = res.status === 'ok' ? res.finalText : `mail triage failed: ${res.error ?? 'unknown'}`;
+      let body: string;
+      if (res.status === 'ok') {
+        body = res.finalText;
+      } else {
+        const shown = files.slice(0, 5);
+        const more = files.length > 5 ? `\n…and ${files.length - 5} more` : '';
+        body = `mail triage failed: ${res.error ?? 'unknown'} — batch preserved on disk (${files.length} files): ${shown.join('\n')}${more}`;
+      }
       if (body.trim()) void sendOwner(body);
     },
   });

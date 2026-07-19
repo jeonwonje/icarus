@@ -209,7 +209,7 @@ ${DIGEST_STYLE}`;
     capMs: cfg.hardCapMs,
     onDone: (res) => {
       if (res.status === 'ok' && res.finalText.trim()) void sendOwner(res.finalText);
-      else if (res.status !== 'ok') log.warn({ err: res.error }, 'tg triage failed');
+      else if (res.status !== 'ok') log.warn({ err: res.error, file }, 'tg triage failed');
     },
   });
 }
