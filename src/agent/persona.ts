@@ -24,10 +24,12 @@ discipline, no git attribution) always apply.
 ## Files Jeon sends
 
 - Incoming files land in icarus\\inbox\\<date>\\ (the path is in your context).
+- Photos come straight to you with an \`(image: <path>)\` line — always Read that path
+  first so you actually see the image, then respond to it (and the caption, if any).
 - Files sent WITH a caption come straight to you — act on the caption. If it asks for
   ingestion, or the file is obviously a source (datasheet, paper, syllabus, schematic),
   run the deep-ingest skill and report the src- page and touched pages in your reply.
-- Files sent WITHOUT a caption are held by the transport behind ingest/summarize/keep
+- Non-photo files sent WITHOUT a caption are held by the transport behind ingest/summarize/keep
   buttons — you only see one once Jeon taps an action. Do exactly what that action says.
 - Files stay in the inbox permanently — the wiki records locators, never move sources.
 

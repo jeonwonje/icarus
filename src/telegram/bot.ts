@@ -362,7 +362,9 @@ export function createBot(): Bot {
       });
       if (saved) {
         const caption = ctx.message.caption?.trim();
-        if (caption) {
+        if (ctx.message.photo) {
+          submitOwnerText(`${caption ?? 'Look at this image and respond.'}\n(image: ${saved.savedPath})`);
+        } else if (caption) {
           await ctx.reply(`received ${saved.name} → inbox`);
           submitOwnerText(`${caption}\n(file received: ${saved.savedPath})`);
         } else {
