@@ -29,6 +29,7 @@ const bootedAt = Date.now();
 
 let typingStop: (() => void) | null = null;
 let stopUi: { timer: NodeJS.Timeout; msgId: number | null } | null = null;
+/** Dialog list snapshot. Valid until next /tg or restart; stale indexes answer via expired(). */
 let tgDialogSnapshot: { id: string; title: string }[] = [];
 
 function armStopButton(): void {
@@ -292,7 +293,11 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
     if (!d) return void (await expired(ctx));
     const nowOn = toggleWhitelist(d.id, d.title);
     await ctx.answerCallbackQuery({ text: `${d.title.slice(0, 40)} ${nowOn ? 'added' : 'removed'}` });
-    await editTo(ctx, await renderTgMenu());
+    try {
+      await editTo(ctx, await renderTgMenu());
+    } catch {
+      await editTo(ctx, { text: `${d.title.slice(0, 40)} ${nowOn ? 'added' : 'removed'} — run /tg again to see the updated list.`, keyboard: new InlineKeyboard() });
+    }
     return;
   }
   await ctx.answerCallbackQuery();
@@ -334,8 +339,12 @@ export function createBot(): Bot {
 
   bot.command('tg', async (ctx) => {
     if (!userbotConnected()) return void (await ctx.reply('userbot not connected — set TG_API_ID/TG_API_HASH/TG_SESSION (npm run tg-login), then /restart.'));
-    const r = await renderTgMenu();
-    await ctx.reply(r.text, { reply_markup: r.keyboard });
+    try {
+      const r = await renderTgMenu();
+      await ctx.reply(r.text, { reply_markup: r.keyboard });
+    } catch (e) {
+      await ctx.reply(`couldn't list dialogs: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`);
+    }
   });
 
   bot.command('feedback', async (ctx) => {
