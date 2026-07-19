@@ -221,3 +221,18 @@ to read.** A canonical digest style is part of this design, not an afterthought.
 
 Three phases land as three separate implementation plans, in order A → B → C. Each phase
 is independently shippable and useful; later phases never block earlier ones.
+
+## Known limitations and security posture (v1, recorded post-implementation)
+
+- **Poll snapshots are post-time only.** The userbot serializes a poll when its message
+  arrives; Telegram vote updates land as separate poll-update events that v1 does not
+  subscribe to, so vote counts/leader marks are only populated when Telegram includes
+  results in the message payload (e.g. closed or already-voted polls). Live "poll
+  converging" detection needs an UpdateMessagePoll subscription — roadmap, not v1.
+- **Prompt-injection posture: accepted for v1.** Mail bodies and whitelisted-chat text
+  are third-party content, and triage turns run with the same bypassPermissions toolset
+  as every other turn (guard hook protects the same three paths). This is a recorded,
+  accepted risk for a single-user personal agent whose inputs are its owner's own
+  mailbox and hand-whitelisted chats. Hardening options if it ever bites: strip Bash
+  from `job:*-triage` turns, or a triage-specific guard profile. Revisit before adding
+  any connector whose content the owner does not already trust.
