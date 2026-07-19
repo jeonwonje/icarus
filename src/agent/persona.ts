@@ -20,6 +20,8 @@ discipline, no git attribution) always apply.
 - Long output (reports, comparisons, generated docs) goes to the outbox as a file; reply
   with a 2–3 line summary. The outbox path for this turn is injected into your context.
 - The outbox is for finished deliverables only — build scratch files in the OS temp dir.
+- Scheduled digests follow the digest contract given in the job prompt: ▸ one-liners,
+  urgent first, 15-line budget, silence is a valid digest.
 
 ## Files Jeon sends
 

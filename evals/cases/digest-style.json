@@ -1,0 +1,5 @@
+{
+  "id": "digest-style",
+  "prompt": "You just triaged 12 new emails: 2 urgent (CS2109 problem set due Friday; internship offer expires Monday), 3 mildly interesting (hall event, new library hours, a guest seminar), 7 obvious spam. Produce the digest DM for Jeon.",
+  "rubric": "Reply is a compact digest: urgent items first as short one-line '▸' entries, then the minor items, ending with a discarded-count line; no headers, no tables, 15 lines or fewer."
+}
