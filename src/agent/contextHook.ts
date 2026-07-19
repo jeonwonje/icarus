@@ -16,7 +16,7 @@ function newInboxFiles(): string[] {
     .get(OWNER_JID) as { ended_at: string } | undefined;
   const since = row ? new Date(row.ended_at).getTime() : 0;
   const found: { p: string; t: number; size: number }[] = [];
-  const walk = (dir: string) => {
+  const walk = (dir: string, topLevel: boolean) => {
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
@@ -24,15 +24,17 @@ function newInboxFiles(): string[] {
       return;
     }
     for (const e of entries) {
+      // Connector output is triaged by its own jobs, not re-announced as new files.
+      if (topLevel && e.isDirectory() && e.name === 'connectors') continue;
       const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
+      if (e.isDirectory()) walk(p, false);
       else {
         const st = statSync(p);
         if (st.mtimeMs > since) found.push({ p, t: st.mtimeMs, size: st.size });
       }
     }
   };
-  walk(cfg.inboxDir);
+  walk(cfg.inboxDir, true);
   return found
     .sort((a, b) => b.t - a.t)
     .slice(0, 20)
