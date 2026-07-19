@@ -5,12 +5,12 @@ import { Bot, Context, InlineKeyboard } from 'grammy';
 import { cfg, MODEL_ALIASES, OWNER_JID, resolveModel, ROOT } from '../config.js';
 import { db, getSetting, now, setSetting } from '../db.js';
 import { log } from '../log.js';
-import { clearPending, hasPending, queueStatus, submitTurn } from '../queue.js';
+import { clearPending, hasPending, queueStatus, submitTurn, abortRunning } from '../queue.js';
 import { clearSession, getSession } from '../agent/sessions.js';
 import { decideProposal, latestPending, listPersonaCommits, revertCommit } from '../improve/proposals.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
 import { saveIncomingFile } from './files.js';
-import { sendOwner, sendOwnerDocument, sendOwnerKeyboard, startTyping } from './send.js';
+import { sendOwner, sendOwnerDocument, sendOwnerKeyboard, sendOwnerEphemeral, deleteOwnerMessage, startTyping } from './send.js';
 import {
   fileActionKeyboard,
   refGet,
@@ -27,20 +27,44 @@ const exec = promisify(execFile);
 const bootedAt = Date.now();
 
 let typingStop: (() => void) | null = null;
+let stopUi: { timer: NodeJS.Timeout; msgId: number | null } | null = null;
+
+function armStopButton(): void {
+  if (stopUi) return;
+  stopUi = {
+    msgId: null,
+    timer: setTimeout(async () => {
+      const msgId = await sendOwnerEphemeral('working… tap to stop', new InlineKeyboard().text('⏹ stop', 'turn:stop'));
+      if (stopUi) stopUi.msgId = msgId;
+      else if (msgId) void deleteOwnerMessage(msgId); // turn finished during the send
+    }, 10_000),
+  };
+}
+
+function disarmStopButton(): void {
+  if (!stopUi) return;
+  clearTimeout(stopUi.timer);
+  if (stopUi.msgId) void deleteOwnerMessage(stopUi.msgId);
+  stopUi = null;
+}
 
 export function submitOwnerText(text: string): void {
   // Coalesced submits share one turn (and one onDone), so typing is a single toggle:
   // start on any submit, stop when no owner turn remains queued.
   if (!typingStop) typingStop = startTyping();
+  armStopButton();
   submitTurn({
     jid: OWNER_JID,
     kind: 'chat',
     lines: [{ ts: new Date(), text }],
     onText: (t) => void sendOwner(t),
     onDone: (res) => {
-      if (!hasPending(OWNER_JID) && typingStop) {
-        typingStop();
-        typingStop = null;
+      if (!hasPending(OWNER_JID)) {
+        disarmStopButton();
+        if (typingStop) {
+          typingStop();
+          typingStop = null;
+        }
       }
       if (res.status === 'aborted') void sendOwner(`(turn aborted: ${res.error})`);
       else if (res.status === 'error') void sendOwner(`turn failed: ${res.error}`);
@@ -107,6 +131,11 @@ async function editTo(ctx: Context, r: Rendered): Promise<void> {
 const expired = (ctx: Context) => ctx.answerCallbackQuery({ text: 'that button expired — run the command again' });
 
 async function handleCallback(ctx: Context, data: string): Promise<void> {
+  if (data === 'turn:stop') {
+    const stopped = abortRunning();
+    await ctx.answerCallbackQuery({ text: stopped ? 'stopping…' : 'nothing running' });
+    return;
+  }
   // -- proposals ----------------------------------------------------------
   if (data.startsWith('prop:')) {
     const [, id, decision] = data.split(':');
@@ -307,6 +336,10 @@ export function createBot(): Bot {
     setTimeout(() => process.exit(0), 500);
   });
 
+  bot.command('stop', async (ctx) => {
+    await ctx.reply(abortRunning() ? 'stopping the current turn…' : 'nothing is running.');
+  });
+
   bot.on('callback_query:data', async (ctx) => {
     try {
       await handleCallback(ctx, ctx.callbackQuery.data);
@@ -341,7 +374,7 @@ export function createBot(): Bot {
       const text = ctx.message.text?.trim();
       if (!text) return;
       if (text.startsWith('/'))
-        return ctx.reply('unknown command — /status /wiki /schedules /model /clear /feedback /revert /restart');
+        return ctx.reply('unknown command — /status /wiki /schedules /model /stop /clear /feedback /revert /restart');
       submitOwnerText(text);
     } catch (e) {
       log.error({ err: String(e) }, 'message handler failed');
@@ -359,6 +392,7 @@ export async function registerCommands(bot: Bot): Promise<void> {
     { command: 'schedules', description: 'manage scheduled tasks' },
     { command: 'model', description: 'switch Claude model' },
     { command: 'clear', description: 'start a fresh conversation' },
+    { command: 'stop', description: 'abort the running turn' },
     { command: 'feedback', description: 'log feedback for the nightly reflection' },
     { command: 'revert', description: 'roll back a persona change' },
     { command: 'restart', description: 'restart Icarus' },

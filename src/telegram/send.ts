@@ -68,3 +68,20 @@ export function startTyping(): () => void {
   const t = setInterval(tick, 4000);
   return () => clearInterval(t);
 }
+
+/** Send a short-lived owner message with a keyboard; returns its id for later deletion. */
+export async function sendOwnerEphemeral(text: string, keyboard: InlineKeyboard): Promise<number | null> {
+  try {
+    const m = await bot.api.sendMessage(cfg.ownerId, text, { reply_markup: keyboard });
+    return m.message_id;
+  } catch (e) {
+    log.error({ err: String(e) }, 'sendOwnerEphemeral failed');
+    return null;
+  }
+}
+
+export async function deleteOwnerMessage(messageId: number): Promise<void> {
+  await bot.api.deleteMessage(cfg.ownerId, messageId).catch(() => {
+    /* already gone — fine */
+  });
+}
