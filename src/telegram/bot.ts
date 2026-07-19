@@ -10,6 +10,7 @@ import { clearSession, getSession } from '../agent/sessions.js';
 import { decideProposal, latestPending, listPersonaCommits, revertCommit } from '../improve/proposals.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
 import { saveIncomingFile } from './files.js';
+import { userbotConnected } from '../connectors/telegramUser.js';
 import { sendOwner, sendOwnerDocument, sendOwnerKeyboard, sendOwnerEphemeral, deleteOwnerMessage, startTyping } from './send.js';
 import {
   fileActionKeyboard,
@@ -107,6 +108,9 @@ async function statusText(): Promise<string> {
       : 'no job runs yet',
     ...(cfg.mailDropDir
       ? [`▸ mail · export ${getSetting('mail_last_export_at')?.slice(0, 16) ?? 'never'} · parse ${getSetting('mail_last_parse') ?? 'never'}`]
+      : []),
+    ...(cfg.tgSession
+      ? [`▸ tg · ${userbotConnected() ? 'connected' : 'offline'} · flush ${getSetting('tg_last_flush') ?? 'never'}`]
       : []),
     `▸ token age · ${tokenAge} · db ${dbSize}`,
   ].join('\n');

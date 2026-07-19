@@ -26,6 +26,7 @@ if (process.argv.includes('--selftest')) {
   console.log(`  desktop cwd: ${cfg.desktopDir}`);
   console.log(`  tz: ${cfg.tz}  model: ${cfg.defaultModel}`);
   console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}  browser mcp: ${cfg.browserMcp ? 'configured' : 'unset'}`);
+  console.log(`  tg userbot: ${cfg.tgSession ? 'configured' : 'unset'}  gcal: ${cfg.gcalClientId ? 'configured' : 'unset'}`);
   console.log(`  persona: ${composePersona().length} chars`);
   console.log('ok');
   process.exit(0);
@@ -88,6 +89,11 @@ trackTokenAge();
 registerCodeJobs();
 const { registerMailWatcher } = await import('./connectors/mail.js');
 registerMailWatcher();
+const { startUserbot } = await import('./connectors/telegramUser.js');
+startUserbot().catch((e) => {
+  log.error({ err: String(e) }, 'userbot failed to start');
+  void sendOwner(`telegram userbot failed to start: ${String(e).slice(0, 200)}`);
+});
 await ensurePersonaCommitted();
 
 // ---- watchdog + process safety -------------------------------------------
