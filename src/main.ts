@@ -25,6 +25,7 @@ if (process.argv.includes('--selftest')) {
   console.log(`  tables: ${tables.join(', ')}`);
   console.log(`  desktop cwd: ${cfg.desktopDir}`);
   console.log(`  tz: ${cfg.tz}  model: ${cfg.defaultModel}`);
+  console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}  browser mcp: ${cfg.browserMcp ? 'configured' : 'unset'}`);
   console.log(`  persona: ${composePersona().length} chars`);
   console.log('ok');
   process.exit(0);
@@ -85,6 +86,8 @@ scheduler.seedSystemRows();
 scheduler.reloadSchedules();
 trackTokenAge();
 registerCodeJobs();
+const { registerMailWatcher } = await import('./connectors/mail.js');
+registerMailWatcher();
 await ensurePersonaCommitted();
 
 // ---- watchdog + process safety -------------------------------------------

@@ -105,6 +105,9 @@ async function statusText(): Promise<string> {
     lastJobs.length
       ? `last jobs:\n${lastJobs.map((j) => `▸ ${j.kind.slice(4)} · ${j.status} · ${j.started_at.slice(5, 16)}`).join('\n')}`
       : 'no job runs yet',
+    ...(cfg.mailDropDir
+      ? [`▸ mail · export ${getSetting('mail_last_export_at')?.slice(0, 16) ?? 'never'} · parse ${getSetting('mail_last_parse') ?? 'never'}`]
+      : []),
     `▸ token age · ${tokenAge} · db ${dbSize}`,
   ].join('\n');
 }
