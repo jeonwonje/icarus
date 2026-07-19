@@ -10,7 +10,7 @@ import { clearSession, getSession } from '../agent/sessions.js';
 import { decideProposal, latestPending, listPersonaCommits, revertCommit } from '../improve/proposals.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
 import { saveIncomingFile } from './files.js';
-import { userbotConnected } from '../connectors/telegramUser.js';
+import { userbotConnected, getWhitelist, listDialogs, toggleWhitelist } from '../connectors/telegramUser.js';
 import { sendOwner, sendOwnerDocument, sendOwnerKeyboard, sendOwnerEphemeral, deleteOwnerMessage, startTyping } from './send.js';
 import {
   fileActionKeyboard,
@@ -29,6 +29,7 @@ const bootedAt = Date.now();
 
 let typingStop: (() => void) | null = null;
 let stopUi: { timer: NodeJS.Timeout; msgId: number | null } | null = null;
+let tgDialogSnapshot: { id: string; title: string }[] = [];
 
 function armStopButton(): void {
   if (stopUi) return;
@@ -124,6 +125,21 @@ function modelMenu(): Rendered {
   const kb = new InlineKeyboard();
   for (const alias of Object.keys(MODEL_ALIASES)) kb.text(alias === current ? `• ${alias}` : alias, `model:${alias}`);
   return { text: `model: ${current} (${resolveModel(current)}) — pick:`, keyboard: kb };
+}
+
+async function renderTgMenu(): Promise<Rendered> {
+  const wl = getWhitelist();
+  tgDialogSnapshot = await listDialogs();
+  const kb = new InlineKeyboard();
+  for (let i = 0; i < tgDialogSnapshot.length; i++) {
+    const d = tgDialogSnapshot[i];
+    const on = wl.some((e) => e.id === d.id);
+    kb.text(`${on ? '✅' : '▫️'} ${d.title.slice(0, 28)}`, `tgw:${i}`).row();
+  }
+  return {
+    text: `personal-chat whitelist (${wl.length} active) — tap to toggle. Only whitelisted chats are ever read.`,
+    keyboard: kb,
+  };
 }
 
 /** Edit the tapped message in place; fall back to a fresh message (e.g. after a doc send). */
@@ -270,6 +286,15 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
     }
     return;
   }
+  // -- telegram whitelist ---------------------------------------------------
+  if (data.startsWith('tgw:')) {
+    const d = tgDialogSnapshot[Number(data.slice(4))];
+    if (!d) return void (await expired(ctx));
+    const nowOn = toggleWhitelist(d.id, d.title);
+    await ctx.answerCallbackQuery({ text: `${d.title.slice(0, 40)} ${nowOn ? 'added' : 'removed'}` });
+    await editTo(ctx, await renderTgMenu());
+    return;
+  }
   await ctx.answerCallbackQuery();
 }
 
@@ -304,6 +329,12 @@ export function createBot(): Bot {
 
   bot.command('wiki', async (ctx) => {
     const r = renderWikiHome();
+    await ctx.reply(r.text, { reply_markup: r.keyboard });
+  });
+
+  bot.command('tg', async (ctx) => {
+    if (!userbotConnected()) return void (await ctx.reply('userbot not connected — set TG_API_ID/TG_API_HASH/TG_SESSION (npm run tg-login), then /restart.'));
+    const r = await renderTgMenu();
     await ctx.reply(r.text, { reply_markup: r.keyboard });
   });
 
@@ -384,7 +415,7 @@ export function createBot(): Bot {
       const text = ctx.message.text?.trim();
       if (!text) return;
       if (text.startsWith('/'))
-        return ctx.reply('unknown command — /status /wiki /schedules /model /stop /clear /feedback /revert /restart');
+        return ctx.reply('unknown command — /status /wiki /schedules /model /stop /clear /feedback /revert /tg /restart');
       submitOwnerText(text);
     } catch (e) {
       log.error({ err: String(e) }, 'message handler failed');
@@ -405,6 +436,7 @@ export async function registerCommands(bot: Bot): Promise<void> {
     { command: 'stop', description: 'abort the running turn' },
     { command: 'feedback', description: 'log feedback for the nightly reflection' },
     { command: 'revert', description: 'roll back a persona change' },
+    { command: 'tg', description: 'manage personal-chat whitelist' },
     { command: 'restart', description: 'restart Icarus' },
   ]);
 }
