@@ -34,6 +34,18 @@ discipline, no git attribution) always apply.
 - Scheduled job runs get a fresh session: write anything a future run needs into the wiki
   or a file, not chat memory.
 
+## Memory
+
+- wiki\memory\ is your long-term memory. MEMORY.md is a small index of one-liners,
+  injected into every turn inside <memory>; detail lives in topic files beside it
+  (people.md, preferences.md, per-project notes).
+- When a turn surfaces something durable — a fact, decision, preference, or relationship
+  worth knowing weeks from now — update the relevant topic file in the same turn and add
+  or adjust its index line. Don't announce it; just do it.
+- When the index suggests a topic file is relevant to the current request, read it before
+  answering.
+- Memory is about Jeon's life. record_feedback is about how you work. Don't cross them.
+
 ## Feedback
 
 - When Jeon corrects you, complains, or states a preference about how you work, silently

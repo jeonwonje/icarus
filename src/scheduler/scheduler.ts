@@ -1,5 +1,5 @@
 ﻿import { Cron } from 'croner';
-import { cfg, REFLECTION_JOB } from '../config.js';
+import { cfg, REFLECTION_JOB, MEMORY_JOB } from '../config.js';
 import { db, now } from '../db.js';
 import { log } from '../log.js';
 import type { TurnResult } from '../queue.js';
@@ -132,14 +132,25 @@ export function removeSchedule(id: number): void {
 }
 
 export function seedSystemRows(): void {
-  const existing = db.prepare('SELECT id FROM schedules WHERE name=?').get(REFLECTION_JOB);
-  if (!existing) {
-    const ts = now();
-    db.prepare(
-      `INSERT INTO schedules(name,cron,tz,prompt,enabled,catch_up,system,created_at,updated_at)
-       VALUES(?,?,?,?,1,1,1,?,?)`,
-    ).run(REFLECTION_JOB, '30 3 * * *', null, '(dynamic — built by reflect.ts each run)', ts, ts);
-  }
+  const insert = db.prepare(
+    `INSERT INTO schedules(name,cron,tz,prompt,enabled,catch_up,system,created_at,updated_at)
+     VALUES(?,?,NULL,?,1,1,1,?,?)`,
+  );
+  const ts = now();
+  if (!db.prepare('SELECT id FROM schedules WHERE name=?').get(REFLECTION_JOB))
+    insert.run(REFLECTION_JOB, '30 3 * * *', '(dynamic — built by reflect.ts each run)', ts, ts);
+  if (!db.prepare('SELECT id FROM schedules WHERE name=?').get(MEMORY_JOB))
+    insert.run(
+      MEMORY_JOB,
+      '15 4 * * *',
+      `Consolidate the memory directory at ${cfg.memoryDir}. Merge duplicate entries across ` +
+        `topic files, prune stale or superseded facts, and keep MEMORY.md an accurate index of ` +
+        `one-liners under 4 KB (detail belongs in topic files, not the index). Surgical edits ` +
+        `only — never rewrite wholesale. Reply with one short line describing what changed, ` +
+        `e.g. "merged 2 duplicate people entries" or "no changes needed".`,
+      ts,
+      ts,
+    );
 }
 
 export function fire(id: number, opts?: { catchUp?: boolean }): void {
