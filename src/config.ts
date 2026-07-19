@@ -40,6 +40,7 @@ export const cfg = {
 
   desktopDir: DESKTOP,
   wikiDir: path.join(DESKTOP, 'wiki'),
+  memoryDir: path.join(DESKTOP, 'wiki', 'memory'),
   personaDir: path.join(ROOT, 'persona'),
   evalCasesDir: path.join(ROOT, 'evals', 'cases'),
   inboxDir: path.join(ROOT, 'inbox'),

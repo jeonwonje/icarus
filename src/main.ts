@@ -6,8 +6,10 @@ openDb();
 
 const { log } = await import('./log.js');
 const { composePersona, scaffoldPersona } = await import('./agent/persona.js');
+const { scaffoldMemory } = await import('./agent/memory.js');
 
 scaffoldPersona();
+scaffoldMemory(cfg.memoryDir);
 for (const d of [cfg.inboxDir, cfg.outboxDir, cfg.stateDir, cfg.logsDir, cfg.proposalsDir, cfg.evalCasesDir]) {
   mkdirSync(d, { recursive: true });
 }

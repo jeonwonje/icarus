@@ -5,6 +5,7 @@ import { cfg, OWNER_JID } from '../config.js';
 import { db } from '../db.js';
 import { outboxDirFor } from '../outbox.js';
 import { listSchedulesWithNextRun } from '../scheduler/scheduler.js';
+import { buildMemoryBlock } from './memory.js';
 
 /** Inbox files modified after the previous owner turn ended (max 20). */
 function newInboxFiles(): string[] {
@@ -51,6 +52,9 @@ export function buildContextHook(jid: string, kind: string, coalesced: number): 
     parts.push(
       `<outbox path="${outboxDirFor(jid)}">Deliverables only — anything dropped here is sent to Jeon as a file after this turn. Build scratch files in the OS temp dir, never here.</outbox>`,
     );
+
+    const memory = buildMemoryBlock(cfg.memoryDir);
+    if (memory) parts.push(memory);
 
     const inbox = newInboxFiles();
     if (inbox.length > 0) parts.push(`<new_inbox_files>\n${inbox.join('\n')}\n</new_inbox_files>`);
