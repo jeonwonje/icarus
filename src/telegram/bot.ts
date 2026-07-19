@@ -31,14 +31,15 @@ let stopUi: { timer: NodeJS.Timeout; msgId: number | null } | null = null;
 
 function armStopButton(): void {
   if (stopUi) return;
-  stopUi = {
+  const armed: { timer: NodeJS.Timeout; msgId: number | null } = {
     msgId: null,
     timer: setTimeout(async () => {
       const msgId = await sendOwnerEphemeral('working… tap to stop', new InlineKeyboard().text('⏹ stop', 'turn:stop'));
-      if (stopUi) stopUi.msgId = msgId;
-      else if (msgId) void deleteOwnerMessage(msgId); // turn finished during the send
+      if (stopUi === armed) stopUi.msgId = msgId;
+      else if (msgId) void deleteOwnerMessage(msgId); // disarmed or re-armed during the send
     }, 10_000),
   };
+  stopUi = armed;
 }
 
 function disarmStopButton(): void {
