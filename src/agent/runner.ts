@@ -57,7 +57,7 @@ export async function runTurn(job: TurnJob): Promise<TurnResult> {
   let resumeRetried = false;
 
   const attempt = async (resume: string | undefined): Promise<TurnResult> => {
-    const ac = new AbortController();
+    const ac = job.ac;
     const hardTimer = setTimeout(() => ac.abort(new Error('hard time cap')), capMs);
     let idleTimer = setTimeout(() => ac.abort(new Error('idle timeout')), cfg.idleCapMs);
     const bumpIdle = () => {

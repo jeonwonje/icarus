@@ -20,6 +20,7 @@ export interface TurnJob {
   onText?: (text: string) => void;
   onDone?: (result: TurnResult) => void;
   enqueuedAt: number;
+  ac: AbortController;
 }
 
 type RunnerFn = (job: TurnJob) => Promise<TurnResult>;
@@ -35,13 +36,13 @@ export function initQueue(fn: RunnerFn, opts?: { onOwnerWaiting?: (k: string) =>
 }
 
 /** One global turn lane. Same-jid pending turns coalesce verbatim; owner turns jump the queue. */
-export function submitTurn(job: Omit<TurnJob, 'enqueuedAt'>): void {
+export function submitTurn(job: Omit<TurnJob, 'enqueuedAt' | 'ac'>): void {
   const existing = pending.find((j) => j.jid === job.jid);
   if (existing) {
     existing.lines.push(...job.lines);
     return;
   }
-  const j: TurnJob = { ...job, enqueuedAt: Date.now() };
+  const j: TurnJob = { ...job, enqueuedAt: Date.now(), ac: new AbortController() };
   if (j.jid === OWNER_JID) {
     const idx = pending.findIndex((p) => p.jid !== OWNER_JID);
     idx === -1 ? pending.push(j) : pending.splice(idx, 0, j);
@@ -80,6 +81,13 @@ export function queueStatus(): { running: { jid: string; kind: string } | null; 
     running: running ? { jid: running.jid, kind: running.kind } : null,
     depth: pending.length,
   };
+}
+
+/** Abort whatever turn is currently running (chat or job). False when idle. */
+export function abortRunning(reason = 'stopped by you'): boolean {
+  if (!running) return false;
+  running.ac.abort(new Error(reason));
+  return true;
 }
 
 export function hasPending(jid: string): boolean {
