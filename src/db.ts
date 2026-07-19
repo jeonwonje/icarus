@@ -82,6 +82,14 @@ const MIGRATIONS: string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE connector_items (
+    source TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    processed_at TEXT NOT NULL,
+    PRIMARY KEY (source, item_id)
+  );
+  `,
 ];
 
 export let db: DatabaseSync;
