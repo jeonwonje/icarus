@@ -208,6 +208,7 @@ function writeAttachments(msg: PSTMessage, dir: string): void {
       mkdirSync(dir, { recursive: true });
       const name = sanitize(att.longFilename || att.filename || `attachment-${i}`);
       out = createWriteStream(path.join(dir, name));
+      out.on('error', (e) => log.warn({ err: String(e) }, 'attachment write failed'));
       const buffer = Buffer.alloc(8176);
       let bytesRead: number;
       do {
