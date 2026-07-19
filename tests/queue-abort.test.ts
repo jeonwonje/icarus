@@ -1,7 +1,5 @@
-// Env must satisfy src/config.ts before any src import (loadEnvFile never overrides these).
-if (!process.env.TELEGRAM_BOT_TOKEN) process.env.TELEGRAM_BOT_TOKEN = 'test-token-0123456789';
-if (!process.env.TELEGRAM_OWNER_ID) process.env.TELEGRAM_OWNER_ID = '1';
-if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) process.env.CLAUDE_CODE_OAUTH_TOKEN = 'test-token-0123456789';
+// env.ts must be imported first — ESM hoists static imports, so it must execute before any src modules load.
+import './env.js';
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
