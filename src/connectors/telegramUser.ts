@@ -197,7 +197,7 @@ ${batch}
 Recent context from the same chat (includes the new lines):
 ${context}
 
-Decide whether any of this matters to Jeon. Most batches are noise — staying silent is the default. Worth acting on: plans or events firming up (a poll converging, a date agreed) → add them with calendar_add_event and note whether Jeon's own vote matches the outcome; deadlines or commitments involving Jeon; saved files worth a look (paths are in the log). Record durable facts in your memory directory.
+Decide whether any of this matters to Jeon. Most batches are noise — staying silent is the default. Worth acting on: plans or events firming up (a poll converging, a date agreed) → add them to the calendar with the calendar MCP tools (if available this turn) and note whether Jeon's own vote matches the outcome; deadlines or commitments involving Jeon; saved files worth a look (paths are in the log). Record durable facts in your memory directory.
 
 Your final reply (if any) is DMed to Jeon.
 

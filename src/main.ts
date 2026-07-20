@@ -26,7 +26,7 @@ if (process.argv.includes('--selftest')) {
   console.log(`  desktop cwd: ${cfg.desktopDir}`);
   console.log(`  tz: ${cfg.tz}  model: ${cfg.defaultModel}`);
   console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}  browser mcp: ${cfg.browserMcp ? 'configured' : 'unset'}`);
-  console.log(`  tg userbot: ${cfg.tgSession ? 'configured' : 'unset'}  gcal: ${cfg.gcalClientId ? 'configured' : 'unset'}`);
+  console.log(`  tg userbot: ${cfg.tgSession ? 'configured' : 'unset'}  calendar mcp: ${cfg.calendarMcp ? 'configured' : 'unset'}`);
   console.log(`  persona: ${composePersona().length} chars`);
   console.log('ok');
   process.exit(0);

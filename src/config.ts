@@ -28,27 +28,26 @@ const Env = z.object({
   ICARUS_TZ: z.string().optional(),
   ICARUS_MAIL_DROP: z.string().optional(),
   ICARUS_BROWSER_MCP: z.string().optional(),
+  ICARUS_CALENDAR_MCP: z.string().optional(),
   TG_API_ID: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().int().positive().optional()),
   TG_API_HASH: z.string().optional(),
   TG_SESSION: z.string().optional(),
-  GCAL_CLIENT_ID: z.string().optional(),
-  GCAL_CLIENT_SECRET: z.string().optional(),
 });
 
 const env = Env.parse(process.env);
 
-const BrowserMcp = z.object({
+const McpJson = z.object({
   command: z.string(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
 });
 
-function parseBrowserMcp(raw: string | undefined) {
+function parseMcpJson(name: string, raw: string | undefined) {
   if (!raw) return undefined;
   try {
-    return BrowserMcp.parse(JSON.parse(raw));
+    return McpJson.parse(JSON.parse(raw));
   } catch (e) {
-    throw new Error(`ICARUS_BROWSER_MCP is not valid JSON {command,args?,env?}: ${String(e).slice(0, 200)}`);
+    throw new Error(`${name} is not valid JSON {command,args?,env?}: ${String(e).slice(0, 200)}`);
   }
 }
 
@@ -60,13 +59,12 @@ export const cfg = {
   defaultModel: env.ICARUS_MODEL,
   tz: env.ICARUS_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
   mailDropDir: env.ICARUS_MAIL_DROP || undefined,
-  browserMcp: parseBrowserMcp(env.ICARUS_BROWSER_MCP),
+  browserMcp: parseMcpJson('ICARUS_BROWSER_MCP', env.ICARUS_BROWSER_MCP),
+  calendarMcp: parseMcpJson('ICARUS_CALENDAR_MCP', env.ICARUS_CALENDAR_MCP),
 
   tgApiId: env.TG_API_ID,
   tgApiHash: env.TG_API_HASH || undefined,
   tgSession: env.TG_SESSION || undefined,
-  gcalClientId: env.GCAL_CLIENT_ID || undefined,
-  gcalClientSecret: env.GCAL_CLIENT_SECRET || undefined,
 
   desktopDir: DESKTOP,
   wikiDir: path.join(DESKTOP, 'wiki'),
@@ -79,7 +77,6 @@ export const cfg = {
   logsDir: path.join(ROOT, 'state', 'logs'),
   proposalsDir: path.join(ROOT, 'state', 'proposals'),
   dbPath: path.join(ROOT, 'state', 'icarus.db'),
-  gcalTokenPath: path.join(ROOT, 'state', 'gcal-token.json'),
   shutdownMarker: path.join(ROOT, 'state', '.clean-shutdown'),
 
   // Paths Claude sessions must never write (guard.ts). Compared case-insensitively.

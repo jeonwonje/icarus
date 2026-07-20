@@ -81,6 +81,8 @@ export async function runTurn(job: TurnJob): Promise<TurnResult> {
           tools: { type: 'preset', preset: 'claude_code' },
           mcpServers: {
             icarus: buildIcarusServer({ jid: job.jid, kind: job.kind, getSessionId: () => sessionId }),
+            // Calendar rides along on every turn; the browser only on triage jobs.
+            ...(cfg.calendarMcp ? { calendar: { type: 'stdio' as const, ...cfg.calendarMcp } } : {}),
             ...(job.browser && cfg.browserMcp ? { browser: { type: 'stdio' as const, ...cfg.browserMcp } } : {}),
           },
           strictMcpConfig: true,

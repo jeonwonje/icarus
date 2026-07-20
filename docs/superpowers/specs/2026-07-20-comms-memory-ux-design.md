@@ -172,16 +172,18 @@ to read.** A canonical digest style is part of this design, not an afterthought.
   entry plus a note on whether the user's vote matches the winner. Real-time-ish by
   design; batching prevents play-by-play narration.
 
-### C4. Google Calendar as native tools
+### C4. Google Calendar via MCP server (revised 2026-07-20, post-ship, per Jeon)
 
-- `icarusTools.ts` gains `calendar_add_event` and `calendar_list_events`, backed by
-  `googleapis`. Available in **every** turn (DM and jobs) uniformly.
-- Setup: Google Cloud OAuth desktop client; `GCAL_CLIENT_ID` / `GCAL_CLIENT_SECRET` in
-  `.env`; one-time `npm run gcal-login` stores the refresh token at
-  `state/gcal-token.json`. Optional: tools return a clear "calendar not configured"
-  error when unset.
-- Chosen over a third-party calendar MCP server for control, uniform availability, and
-  because the read side quietly enables the future morning briefing.
+- Originally shipped as native `googleapis`-backed tools; Jeon asked for the calendar
+  MCP instead, so the native path (gcal.ts, `calendar_add_event`/`calendar_list_events`,
+  `gcal-login`, the `googleapis` dependency) was removed.
+- Wiring mirrors the browser MCP pattern: `ICARUS_CALENDAR_MCP` in `.env` holds a JSON
+  `{command, args?, env?}` stdio server config, validated at boot. Unlike the browser
+  (triage jobs only), the calendar server is attached to **every** turn (DM and jobs)
+  as `mcpServers.calendar`, preserving the uniform-availability requirement.
+- Optional: when unset, no server is attached and prompts that mention calendar tools
+  say "if available this turn". Tool names are whatever the configured server exposes
+  (`mcp__calendar__*`), so prompts reference calendar tools generically.
 
 ---
 

@@ -11,8 +11,6 @@ import {
   validateCron,
 } from '../scheduler/scheduler.js';
 import { sendOwner } from '../telegram/send.js';
-import { buildEventBody, getCalendar } from '../connectors/gcal.js';
-import { cfg } from '../config.js';
 
 export interface TurnContext {
   jid: string;
@@ -147,47 +145,6 @@ export function buildIcarusServer(ctx: TurnContext) {
         async (args) => {
           try {
             return ok(await createProposal(args));
-          } catch (e) {
-            return fail(e);
-          }
-        },
-      ),
-      tool(
-        'calendar_add_event',
-        "Add an event to Jeon's Google Calendar. Use YYYY-MM-DD start for all-day events, full ISO datetime for timed ones.",
-        {
-          title: z.string(),
-          start: z.string().describe('ISO datetime, or YYYY-MM-DD for all-day'),
-          end: z.string().optional().describe('ISO datetime or YYYY-MM-DD; defaults to +60min / single day'),
-          description: z.string().optional(),
-          location: z.string().optional(),
-        },
-        async (args) => {
-          try {
-            const res = await getCalendar().events.insert({ calendarId: 'primary', requestBody: buildEventBody(args, cfg.tz) });
-            return ok(`event created: ${res.data.summary} · ${res.data.start?.dateTime ?? res.data.start?.date} · ${res.data.htmlLink ?? ''}`);
-          } catch (e) {
-            return fail(e);
-          }
-        },
-      ),
-      tool(
-        'calendar_list_events',
-        "List upcoming events from Jeon's Google Calendar.",
-        { days: z.number().int().positive().optional().describe('lookahead window, default 7') },
-        async ({ days }) => {
-          try {
-            const res = await getCalendar().events.list({
-              calendarId: 'primary',
-              timeMin: new Date().toISOString(),
-              timeMax: new Date(Date.now() + (days ?? 7) * 86_400_000).toISOString(),
-              singleEvents: true,
-              orderBy: 'startTime',
-              maxResults: 30,
-            });
-            const items = res.data.items ?? [];
-            if (items.length === 0) return ok('no events in window');
-            return ok(items.map((e) => `▸ ${e.start?.dateTime ?? e.start?.date} · ${e.summary ?? '(untitled)'}`).join('\n'));
           } catch (e) {
             return fail(e);
           }
