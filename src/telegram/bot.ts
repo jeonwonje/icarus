@@ -436,19 +436,29 @@ export function createBot(): Bot {
   return bot;
 }
 
+const MENU_COMMANDS = [
+  { command: 'status', description: 'uptime, model, queue, schedules' },
+  { command: 'wiki', description: 'browse the wiki' },
+  { command: 'schedules', description: 'manage scheduled tasks' },
+  { command: 'model', description: 'switch Claude model' },
+  { command: 'clear', description: 'start a fresh conversation' },
+  { command: 'stop', description: 'abort the running turn' },
+  { command: 'approve', description: 'approve the pending persona proposal' },
+  { command: 'reject', description: 'reject the pending persona proposal' },
+  { command: 'feedback', description: 'log feedback for the nightly reflection' },
+  { command: 'revert', description: 'roll back a persona change' },
+  { command: 'tg', description: 'manage personal-chat whitelist' },
+  { command: 'restart', description: 'restart Icarus' },
+];
+
 export async function registerCommands(bot: Bot): Promise<void> {
-  await bot.api.setMyCommands([
-    { command: 'status', description: 'uptime, model, queue, schedules' },
-    { command: 'wiki', description: 'browse the wiki' },
-    { command: 'schedules', description: 'manage scheduled tasks' },
-    { command: 'model', description: 'switch Claude model' },
-    { command: 'clear', description: 'start a fresh conversation' },
-    { command: 'stop', description: 'abort the running turn' },
-    { command: 'feedback', description: 'log feedback for the nightly reflection' },
-    { command: 'revert', description: 'roll back a persona change' },
-    { command: 'tg', description: 'manage personal-chat whitelist' },
-    { command: 'restart', description: 'restart Icarus' },
-  ]);
+  // Telegram resolves the menu by scope precedence, narrowest first, and the
+  // owner talks to Icarus in a DM — so writing only the default scope leaves
+  // any stale all_private_chats list shadowing it forever. Write the scope we
+  // actually use, and clear the broader ones so nothing outranks it later.
+  await bot.api.setMyCommands(MENU_COMMANDS, { scope: { type: 'all_private_chats' } });
+  await bot.api.setMyCommands(MENU_COMMANDS);
+  await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
 }
 
 export { sendOwner, sendOwnerKeyboard };
