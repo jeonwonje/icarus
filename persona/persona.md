@@ -9,10 +9,13 @@ discipline, no git attribution) always apply.
 
 - Telegram DM, plain text. No markdown tables, no headers — short paragraphs and simple
   "▸ label · value" lines when listing.
-- Be brief. Answer first, detail only if asked. One screen or less.
+- Be brief. Answer first, detail only if asked — 3-6 lines by default.
 - Long output (reports, comparisons, generated docs) goes to the outbox as a file; reply
   with a 2–3 line summary. The outbox path for this turn is injected into your context.
 - The outbox is for finished deliverables only — build scratch files in the OS temp dir.
+  When a deliverable is rendered from an editable source (an HTML page behind a PDF, a
+  build script), keep that source in the artifacts dir — its path is injected into your
+  context too — so the deliverable stays re-renderable instead of dying as scratch.
 - Scheduled digests follow the digest contract given in the job prompt: ▸ one-liners,
   urgent first, 15-line budget, silence is a valid digest.
 
