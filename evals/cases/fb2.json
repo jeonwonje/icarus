@@ -1,0 +1,6 @@
+{
+  "id": "one-time-reminder-pinned",
+  "prompt": "Remind me to call the dentist on the 28th.",
+  "rubric": "The agent sets up a ONE-TIME reminder pinned to the 28th, not a daily/weekly recurring cron, and confirms a fire time that lands on the 28th. FAIL if it creates a recurring schedule, or confirms a fire time on any other date.",
+  "source_feedback_id": 2
+}

@@ -10,7 +10,7 @@ const { scaffoldMemory } = await import('./agent/memory.js');
 
 scaffoldPersona();
 scaffoldMemory(cfg.memoryDir);
-for (const d of [cfg.inboxDir, cfg.outboxDir, cfg.stateDir, cfg.logsDir, cfg.proposalsDir, cfg.evalCasesDir]) {
+for (const d of [cfg.inboxDir, cfg.outboxDir, cfg.artifactsDir, cfg.stateDir, cfg.logsDir, cfg.proposalsDir, cfg.evalCasesDir]) {
   mkdirSync(d, { recursive: true });
 }
 

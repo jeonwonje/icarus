@@ -73,6 +73,7 @@ export const cfg = {
   evalCasesDir: path.join(ROOT, 'evals', 'cases'),
   inboxDir: path.join(ROOT, 'inbox'),
   outboxDir: path.join(ROOT, 'outbox'),
+  artifactsDir: path.join(ROOT, 'artifacts'),
   stateDir: path.join(ROOT, 'state'),
   logsDir: path.join(ROOT, 'state', 'logs'),
   proposalsDir: path.join(ROOT, 'state', 'proposals'),

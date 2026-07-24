@@ -83,7 +83,7 @@ src\            the code (TypeScript, tsx, no build step)
 persona\        its operating instructions — the only files it may edit itself
 evals\cases\    tiny regression tests for the persona (npm run evals)
 scripts\        supervisor loop + Task Scheduler registration
-inbox\ outbox\ state\   runtime data — gitignored, stays on the machine
+inbox\ outbox\ artifacts\ state\   runtime data — gitignored, stays on the machine
 ```
 
 `.env` (secrets) and all runtime data are gitignored. This repo is code and instructions

@@ -54,6 +54,9 @@ export function buildContextHook(jid: string, kind: string, coalesced: number): 
     parts.push(
       `<outbox path="${outboxDirFor(jid)}">Deliverables only — anything dropped here is sent to Jeon as a file after this turn. Build scratch files in the OS temp dir, never here.</outbox>`,
     );
+    parts.push(
+      `<artifacts path="${cfg.artifactsDir}">When a deliverable is rendered from an editable source (HTML, a build script, a spreadsheet formula sheet), keep that source here so it stays re-editable and re-renderable. Throwaway scratch still belongs in the OS temp dir.</artifacts>`,
+    );
 
     const memory = buildMemoryBlock(cfg.memoryDir);
     if (memory) parts.push(memory);

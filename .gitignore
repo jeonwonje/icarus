@@ -3,4 +3,5 @@ node_modules/
 state/
 inbox/
 outbox/
+artifacts/
 *.log
