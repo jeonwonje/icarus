@@ -4,6 +4,7 @@ import { db } from '../../db.js';
 import { submitTurn } from '../../queue.js';
 import { sendOwner } from '../../telegram/send.js';
 import { GramJsTelegramAdapter } from './adapter.js';
+import { TelegramArchiveQuery } from './archiveQuery.js';
 import {
   TelegramArchiveStore,
   type TelegramChatRow,
@@ -45,6 +46,7 @@ export interface RuntimeOverrides {
 export class TelegramArchiveRuntime {
   private constructor(
     private readonly store: TelegramArchiveStore,
+    private readonly archiveQuery: TelegramArchiveQuery,
     private readonly blobs: TelegramBlobStore,
     private readonly adapter: TelegramAdapter,
     private readonly manager: TelegramSyncManager,
@@ -63,6 +65,7 @@ export class TelegramArchiveRuntime {
         session: cfg.tgSession!,
       });
     const store = new TelegramArchiveStore(database);
+    const archiveQuery = new TelegramArchiveQuery(store);
     const blobs = new TelegramBlobStore(archiveDir);
     const snapshots = new LinkSnapshotter();
     const bridge = new TelegramTriageBridge({
@@ -79,7 +82,11 @@ export class TelegramArchiveRuntime {
       session: overrides ? undefined : cfg.tgSession,
       onNewLiveMessage: (peerKey, messageId) => bridge.noteMessage(peerKey, messageId),
     });
-    return new TelegramArchiveRuntime(store, blobs, adapter, manager, bridge);
+    return new TelegramArchiveRuntime(store, archiveQuery, blobs, adapter, manager, bridge);
+  }
+
+  query(): TelegramArchiveQuery {
+    return this.archiveQuery;
   }
 
   async start(): Promise<void> {
@@ -232,6 +239,10 @@ export async function stopTelegramRuntime(): Promise<void> {
 
 export const telegramRuntime = (): TelegramArchiveRuntime | null => current;
 export const telegramHealth = (): TelegramHealth => current?.health() ?? lastHealth;
+
+export function telegramArchiveQuery(): TelegramArchiveQuery | null {
+  return current?.query() ?? null;
+}
 
 /** Test seam: clears the singleton between cases without going through stop. */
 export function resetTelegramRuntimeForTest(): void {

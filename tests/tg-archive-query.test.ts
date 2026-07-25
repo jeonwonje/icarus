@@ -3,7 +3,7 @@ import './env.js';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { TelegramArchiveQuery } from '../src/connectors/telegram/archiveQuery.js';
+import { formatHitLines, TelegramArchiveQuery } from '../src/connectors/telegram/archiveQuery.js';
 import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
 import type { TelegramMessage } from '../src/connectors/telegram/types.js';
 import { migrateDb } from '../src/db.js';
@@ -100,4 +100,12 @@ test('window loads neighbors chronologically and supports supergroup deep link w
 test('window not-found for missing message', () => {
   const q = seeded();
   assert.throws(() => q.window({ peerKey: 'supergroup:99', messageId: 999 }), /not found/i);
+});
+
+test('formatters label archived third-party text for tools', () => {
+  const q = seeded();
+  const hits = q.search({ query: 'chassis' });
+  const body = formatHitLines(hits);
+  assert.match(body, /t\.me/);
+  assert.match(body, /Morian/);
 });
