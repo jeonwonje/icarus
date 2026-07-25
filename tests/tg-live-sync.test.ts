@@ -238,3 +238,58 @@ test('live events for chats that were never selected are ignored', async () => {
   assert.equal(h.store.getUpdateState('live:dm:99'), undefined);
   await h.manager.stop();
 });
+
+test('stop then start clears a stuck unreachable gate so the work lane runs', async () => {
+  const h = makeLiveHarness({
+    messages: { 'dm:1': [message('dm:1', 5, 'after restart')], 'supergroup:2': [] },
+  });
+  await h.manager.start();
+  await h.adapter.emit({
+    type: 'reactions',
+    peerKey: 'dm:1',
+    messageId: 5,
+    reactionsJson: '[]',
+    observedAt: '2026-01-02T00:00:00.000Z',
+  });
+  await h.adapter.disconnect();
+  assert.equal(await h.manager.runOneCycle(), false);
+  await h.manager.stop();
+
+  // bootstrap() connects before handlers are registered, so a prior disconnect's reachable=false
+  // must be cleared on the successful connect — otherwise health says connected while cycle()
+  // always returns early.
+  await h.manager.start();
+  assert.equal(h.store.getHealth().state, 'connected');
+  const deadline = Date.now() + 2000;
+  while (!h.store.getMessage('dm:1', 5) && Date.now() < deadline) {
+    await h.manager.runOneCycle();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(h.store.getMessage('dm:1', 5)?.text, 'after restart');
+  await h.manager.stop();
+});
+
+test('a disconnect mid-reconcile does not report connected while offline', async () => {
+  const h = makeLiveHarness();
+  // A persisted position makes the reconnect catch-up call getGlobalDifference (not just seed).
+  h.store.setUpdateState('global', '{"pts":1}');
+  await h.manager.start();
+  await h.adapter.disconnect();
+  assert.equal(h.store.getHealth().state, 'temporarily_offline');
+
+  let dropped = false;
+  const real = h.adapter.getGlobalDifference.bind(h.adapter);
+  h.adapter.getGlobalDifference = async (state) => {
+    if (!dropped) {
+      dropped = true;
+      await h.adapter.disconnect();
+    }
+    return real(state);
+  };
+
+  await h.adapter.connect();
+  await h.manager.waitForReconciliation();
+  assert.equal(h.adapter.connected, false);
+  assert.equal(h.store.getHealth().state, 'temporarily_offline');
+  await h.manager.stop();
+});

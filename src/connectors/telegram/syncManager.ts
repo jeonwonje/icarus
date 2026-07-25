@@ -260,6 +260,10 @@ export class TelegramSyncManager {
     this.deps.store.setHealth('connecting');
     try {
       await this.deps.adapter.connect();
+      // Handlers are registered after connect, so the connect notification cannot clear a
+      // reachable=false left by a prior disconnect → stop → start. The successful connect is
+      // the observation that the lane may fetch again.
+      this.reachable = true;
       if (!(await this.verifyAuthorization())) return;
     } catch (error) {
       log.warn({ err: error }, 'telegram sync could not connect');
@@ -322,7 +326,9 @@ export class TelegramSyncManager {
     try {
       if (!authorized && !(await this.verifyAuthorization())) return;
       const gaps = await this.reconcile();
-      if (!this.running) return;
+      // A disconnect mid-reconcile already persisted temporarily_offline; finishing the
+      // in-flight pass must not overwrite that with connected while the socket is dead.
+      if (!this.running || !this.reachable) return;
       this.deps.store.setHealth(
         'connected',
         gaps.size === 0
