@@ -224,6 +224,30 @@ const MIGRATIONS: string[] = [
     tokenize='unicode61'
   );
   `,
+  `
+  CREATE TABLE tg_project_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_key TEXT NOT NULL REFERENCES tg_chats(peer_key) ON DELETE CASCADE,
+    wiki_project TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    score REAL NOT NULL,
+    fingerprint TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending','approved','rejected')),
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    UNIQUE(peer_key, fingerprint)
+  );
+  CREATE INDEX idx_tg_project_proposals_pending
+    ON tg_project_proposals(state, peer_key);
+  CREATE TABLE tg_project_mappings (
+    peer_key TEXT PRIMARY KEY REFERENCES tg_chats(peer_key) ON DELETE CASCADE,
+    wiki_project TEXT NOT NULL,
+    brief_path TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    proposal_id INTEGER REFERENCES tg_project_proposals(id)
+  );
+  CREATE INDEX idx_tg_project_mappings_project ON tg_project_mappings(wiki_project);
+  `,
 ];
 
 export let db: DatabaseSync;

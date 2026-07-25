@@ -22,6 +22,8 @@ test('telegram migration creates archive tables and FTS5 index', () => {
     'tg_message_versions',
     'tg_messages',
     'tg_participants',
+    'tg_project_mappings',
+    'tg_project_proposals',
     'tg_update_state',
     'tg_work_items',
   ]) {
@@ -29,7 +31,7 @@ test('telegram migration creates archive tables and FTS5 index', () => {
   }
   assert.equal(
     (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version,
-    3,
+    4,
   );
 });
 
