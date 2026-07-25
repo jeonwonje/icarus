@@ -1519,6 +1519,17 @@ export class TelegramArchiveStore {
     return row ? mapMessageRow(row) : undefined;
   }
 
+  newestMessageId(peerKey: string): number | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT message_id FROM tg_messages
+         WHERE peer_key=? AND deleted_at IS NULL
+         ORDER BY message_id DESC LIMIT 1`,
+      )
+      .get(peerKey) as unknown as { message_id: number } | undefined;
+    return row?.message_id;
+  }
+
   searchFts(input: {
     match: string;
     peerKey?: string;
