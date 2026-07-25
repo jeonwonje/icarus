@@ -13,6 +13,10 @@ import type {
 } from './types.js';
 
 const TRIAGE_FAILURE_ALERT_THRESHOLD = 3;
+/** Marks the pauses the lane itself may lift once the archive volume has room again. */
+const LOW_DISK_PREFIX = 'low disk: ';
+/** Work states that still owe the import something; anything else is terminal. */
+const OPEN_WORK_STATES = "('pending','in_progress','retry','paused')";
 
 const computeVersionHash = (input: {
   text: string;
@@ -75,16 +79,48 @@ export interface TelegramChatRow {
   peerKey: string;
   kind: TelegramPeerKind;
   title: string;
+  username?: string;
+  accessHash?: string;
   selected: boolean;
   lastLiveAt?: string;
   lastReconciledAt?: string;
   healthError?: string;
 }
 
+export interface TelegramMediaTarget {
+  mediaKey: string;
+  peerKey: string;
+  messageId: number;
+  expectedSize?: number;
+  status: string;
+  blobHash?: string;
+}
+
+export interface TelegramLinkTarget {
+  id: number;
+  peerKey: string;
+  messageId: number;
+  url: string;
+  normalizedUrl: string;
+  status: string;
+}
+
+export interface TelegramImportSummary {
+  title: string;
+  importedMessages: number;
+  totalMessages?: number;
+  downloadedMediaBytes: number;
+  linkSnapshots: number;
+  failedMedia: number;
+  failedLinks: number;
+}
+
 interface RawChatRow {
   peer_key: string;
   kind: TelegramPeerKind;
   title: string;
+  username: string | null;
+  access_hash: string | null;
   selected: number;
   last_live_at: string | null;
   last_reconciled_at: string | null;
@@ -124,6 +160,8 @@ const mapChatRow = (row: RawChatRow): TelegramChatRow => ({
   peerKey: row.peer_key,
   kind: row.kind,
   title: row.title,
+  username: row.username ?? undefined,
+  accessHash: row.access_hash ?? undefined,
   selected: row.selected === 1,
   lastLiveAt: row.last_live_at ?? undefined,
   lastReconciledAt: row.last_reconciled_at ?? undefined,
@@ -195,17 +233,20 @@ export class TelegramArchiveStore {
   getChat(peerKey: string): TelegramChatRow | undefined {
     const row = this.db
       .prepare(
-        `SELECT peer_key,kind,title,selected,last_live_at,last_reconciled_at,health_error
+        `SELECT peer_key,kind,title,username,access_hash,selected,last_live_at,
+                last_reconciled_at,health_error
          FROM tg_chats WHERE peer_key=?`,
       )
       .get(peerKey) as unknown as RawChatRow | undefined;
     return row ? mapChatRow(row) : undefined;
   }
 
+  /** Carries the access hash so a restarted adapter can address these peers again. */
   listSelectedChats(): TelegramChatRow[] {
     const rows = this.db
       .prepare(
-        `SELECT peer_key,kind,title,selected,last_live_at,last_reconciled_at,health_error
+        `SELECT peer_key,kind,title,username,access_hash,selected,last_live_at,
+                last_reconciled_at,health_error
          FROM tg_chats WHERE selected=1 ORDER BY title`,
       )
       .all() as unknown as RawChatRow[];
@@ -435,6 +476,135 @@ export class TelegramArchiveStore {
       .run(state, error ?? null, state, ts, ts, peerKey);
   }
 
+  /** Records a retry without changing the phase, so the cursor survives the wait. */
+  deferImport(peerKey: string, error: string, retryAt: string): void {
+    this.db
+      .prepare(
+        `UPDATE tg_import_jobs SET next_retry_at=?,last_error=?,updated_at=? WHERE peer_key=?`,
+      )
+      .run(retryAt, error, now(), peerKey);
+  }
+
+  clearImportRetry(peerKey: string): void {
+    this.db
+      .prepare(
+        `UPDATE tg_import_jobs SET next_retry_at=NULL,last_error=NULL,updated_at=?
+         WHERE peer_key=? AND (next_retry_at IS NOT NULL OR last_error IS NOT NULL)`,
+      )
+      .run(now(), peerKey);
+  }
+
+  pauseImport(peerKey: string): boolean {
+    return this.changed(
+      `UPDATE tg_import_jobs SET state='paused',updated_at=?
+       WHERE peer_key=? AND state IN ('scanning','acquiring')`,
+      now(),
+      peerKey,
+    );
+  }
+
+  /**
+   * A finished scan leaves imported messages behind and no cursor, which is how a resumed
+   * job knows to go straight back to acquisition instead of re-walking the whole history.
+   */
+  resumeImport(peerKey: string): boolean {
+    return this.changed(
+      `UPDATE tg_import_jobs
+       SET state=CASE WHEN imported_messages>0 AND oldest_message_id IS NULL
+                      THEN 'acquiring' ELSE 'scanning' END,
+           next_retry_at=NULL,last_error=NULL,updated_at=?
+       WHERE peer_key=? AND state IN ('paused','error')`,
+      now(),
+      peerKey,
+    );
+  }
+
+  /** Stops future work only. Imported rows, blobs, and queue history are all preserved. */
+  cancelImport(peerKey: string): boolean {
+    return this.changed(
+      `UPDATE tg_import_jobs SET state='cancelled',updated_at=?
+       WHERE peer_key=? AND state NOT IN ('complete','cancelled')`,
+      now(),
+      peerKey,
+    );
+  }
+
+  /** Re-queues this chat's failed and paused acquisition work with a fresh retry budget. */
+  retryFailedWork(peerKey: string): number {
+    this.db.exec('BEGIN');
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE tg_work_items SET state='pending',attempts=0,next_retry_at=NULL,last_error=NULL
+           WHERE peer_key=? AND state IN ('failed','paused')`,
+        )
+        .run(peerKey);
+      this.db
+        .prepare(
+          `UPDATE tg_media SET status='pending',error=NULL,retry_at=NULL
+           WHERE peer_key=? AND status IN ('failed','paused')`,
+        )
+        .run(peerKey);
+      const requeued = Number(result.changes);
+      // A finished import that owes work again is not finished; reopen it so the lane can
+      // complete it a second time once the queue drains.
+      if (requeued > 0) {
+        this.db
+          .prepare(
+            `UPDATE tg_import_jobs SET state='acquiring',completed_at=NULL,updated_at=?
+             WHERE peer_key=? AND state='complete'`,
+          )
+          .run(now(), peerKey);
+      }
+      this.db.exec('COMMIT');
+      return requeued;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /**
+   * Completes an import once its queue is drained. Imported counts are never compared with
+   * the Telegram total: service messages the adapter filters keep that total out of reach.
+   */
+  completeImport(peerKey: string, at: string): boolean {
+    return this.changed(
+      `UPDATE tg_import_jobs SET state='complete',completed_at=?,updated_at=?
+       WHERE peer_key=? AND state='acquiring'
+         AND NOT EXISTS (
+           SELECT 1 FROM tg_work_items w
+           WHERE w.peer_key=tg_import_jobs.peer_key AND w.state IN ${OPEN_WORK_STATES}
+         )`,
+      at,
+      at,
+      peerKey,
+    );
+  }
+
+  getImportSummary(peerKey: string): TelegramImportSummary | undefined {
+    const job = this.getImport(peerKey);
+    if (!job) return undefined;
+    const counters = this.db
+      .prepare(
+        `SELECT downloaded_media_bytes AS bytes,failed_media AS media,failed_links AS links
+         FROM tg_import_jobs WHERE peer_key=?`,
+      )
+      .get(peerKey) as unknown as { bytes: number; media: number; links: number };
+    const snapshots = this.db
+      .prepare(`SELECT COUNT(1) AS n FROM tg_links WHERE peer_key=? AND status='complete'`)
+      .get(peerKey) as unknown as { n: number };
+    return {
+      title: this.getChat(peerKey)?.title ?? peerKey,
+      importedMessages: job.importedMessages,
+      totalMessages: job.totalMessages,
+      downloadedMediaBytes: counters.bytes,
+      linkSnapshots: snapshots.n,
+      failedMedia: counters.media,
+      failedLinks: counters.links,
+    };
+  }
+
   completeReadyImports(at: string): void {
     this.db
       .prepare(
@@ -453,7 +623,11 @@ export class TelegramArchiveStore {
         .prepare(
           `
         SELECT * FROM tg_work_items
-        WHERE state='pending' AND (next_retry_at IS NULL OR next_retry_at<=?)
+        WHERE state IN ('pending','retry') AND (next_retry_at IS NULL OR next_retry_at<=?)
+          AND NOT EXISTS (
+            SELECT 1 FROM tg_import_jobs j
+            WHERE j.peer_key=tg_work_items.peer_key AND j.state IN ('paused','cancelled')
+          )
         ORDER BY id LIMIT 1
       `,
         )
@@ -481,6 +655,266 @@ export class TelegramArchiveStore {
         `UPDATE tg_work_items SET state=?,attempts=attempts+1,last_error=?,next_retry_at=? WHERE id=?`,
       )
       .run(retryAt ? 'pending' : 'failed', error, retryAt ?? null, id);
+  }
+
+  /**
+   * Waits out a server-imposed delay. Telegram pacing us is not the item misbehaving, so the
+   * attempt count — and with it the bounded retry budget — is left alone.
+   */
+  deferWorkItem(id: number, error: string, retryAt: string): void {
+    this.db
+      .prepare(`UPDATE tg_work_items SET state='retry',last_error=?,next_retry_at=? WHERE id=?`)
+      .run(error, retryAt, id);
+  }
+
+  pauseWorkItem(
+    id: number,
+    error: string,
+    options: { lowDisk?: boolean; retryAt?: string } = {},
+  ): void {
+    this.db
+      .prepare(`UPDATE tg_work_items SET state='paused',last_error=?,next_retry_at=? WHERE id=?`)
+      .run(
+        options.lowDisk ? `${LOW_DISK_PREFIX}${error}` : error,
+        options.retryAt ?? null,
+        id,
+      );
+  }
+
+  /** Lifts only the lane's own low-disk pauses; storage faults stay paused for a human. */
+  resumeLowDiskWork(at: string): number {
+    this.db.exec('BEGIN');
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE tg_work_items SET state='pending',next_retry_at=NULL
+           WHERE state='paused' AND last_error LIKE ?
+             AND (next_retry_at IS NULL OR next_retry_at<=?)`,
+        )
+        .run(`${LOW_DISK_PREFIX}%`, at);
+      const resumed = Number(result.changes);
+      if (resumed > 0) {
+        this.db
+          .prepare(
+            `UPDATE tg_media SET status='pending',retry_at=NULL
+             WHERE status='paused' AND media_key IN (
+               SELECT item_key FROM tg_work_items WHERE kind='media' AND state='pending'
+             )`,
+          )
+          .run();
+      }
+      this.db.exec('COMMIT');
+      return resumed;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  getMediaTarget(mediaKey: string): TelegramMediaTarget | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT media_key,peer_key,message_id,expected_size,status,blob_hash
+         FROM tg_media WHERE media_key=?`,
+      )
+      .get(mediaKey) as unknown as
+      | {
+          media_key: string;
+          peer_key: string;
+          message_id: number;
+          expected_size: number | null;
+          status: string;
+          blob_hash: string | null;
+        }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      mediaKey: row.media_key,
+      peerKey: row.peer_key,
+      messageId: row.message_id,
+      expectedSize: row.expected_size ?? undefined,
+      status: row.status,
+      blobHash: row.blob_hash ?? undefined,
+    };
+  }
+
+  completeMediaWork(input: {
+    workItemId: number;
+    mediaKey: string;
+    peerKey: string;
+    blobHash: string;
+    bytes: number;
+  }): void {
+    this.db.exec('BEGIN');
+    try {
+      this.db
+        .prepare(
+          `UPDATE tg_media SET blob_hash=?,bytes=?,status='done',error=NULL,retry_at=NULL
+           WHERE media_key=?`,
+        )
+        .run(input.blobHash, input.bytes, input.mediaKey);
+      this.db
+        .prepare(`UPDATE tg_work_items SET state='done',last_error=NULL,next_retry_at=NULL WHERE id=?`)
+        .run(input.workItemId);
+      this.db
+        .prepare(
+          `UPDATE tg_import_jobs SET downloaded_media_bytes=downloaded_media_bytes+?,updated_at=?
+           WHERE peer_key=?`,
+        )
+        .run(input.bytes, now(), input.peerKey);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Keeps the queue entry and its media row on the same verdict. */
+  recordMediaFailure(input: {
+    workItemId: number;
+    mediaKey: string;
+    peerKey: string;
+    error: string;
+    disposition: 'flood' | 'backoff' | 'storage' | 'low_disk' | 'failed';
+    retryAt?: string;
+  }): void {
+    this.db.exec('BEGIN');
+    try {
+      if (input.disposition === 'flood' && input.retryAt) {
+        this.deferWorkItem(input.workItemId, input.error, input.retryAt);
+      } else if (input.disposition === 'flood' || input.disposition === 'backoff') {
+        this.failWorkItem(input.workItemId, input.error, input.retryAt);
+      } else if (input.disposition === 'failed') {
+        this.failWorkItem(input.workItemId, input.error);
+      } else {
+        this.pauseWorkItem(input.workItemId, input.error, {
+          lowDisk: input.disposition === 'low_disk',
+          retryAt: input.retryAt,
+        });
+      }
+      const status =
+        input.disposition === 'failed'
+          ? 'failed'
+          : input.disposition === 'storage' || input.disposition === 'low_disk'
+            ? 'paused'
+            : 'pending';
+      this.db
+        .prepare(`UPDATE tg_media SET status=?,error=?,retry_at=? WHERE media_key=?`)
+        .run(status, input.error, input.retryAt ?? null, input.mediaKey);
+      if (input.disposition === 'failed') {
+        this.db
+          .prepare(
+            `UPDATE tg_import_jobs SET failed_media=failed_media+1,updated_at=? WHERE peer_key=?`,
+          )
+          .run(now(), input.peerKey);
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Resolves the `peerKey:messageId:normalizedUrl` queue key back to its link row. */
+  getLinkTarget(peerKey: string, itemKey: string): TelegramLinkTarget | undefined {
+    const prefix = `${peerKey}:`;
+    if (!itemKey.startsWith(prefix)) return undefined;
+    const rest = itemKey.slice(prefix.length);
+    const separator = rest.indexOf(':');
+    if (separator < 0) return undefined;
+    const messageId = Number(rest.slice(0, separator));
+    if (!Number.isInteger(messageId)) return undefined;
+    const normalizedUrl = rest.slice(separator + 1);
+    const row = this.db
+      .prepare(
+        `SELECT id,original_url,status FROM tg_links
+         WHERE peer_key=? AND message_id=? AND normalized_url=?`,
+      )
+      .get(peerKey, messageId, normalizedUrl) as unknown as
+      | { id: number; original_url: string; status: string }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      peerKey,
+      messageId,
+      url: row.original_url,
+      normalizedUrl,
+      status: row.status,
+    };
+  }
+
+  completeLinkWork(input: {
+    workItemId: number;
+    linkId: number;
+    peerKey: string;
+    messageId: number;
+    fetchedAt: string;
+    result:
+      | {
+          status: 'complete';
+          finalUrl: string;
+          responseJson: string;
+          snapshotHash: string;
+          text: string;
+        }
+      | { status: 'unavailable'; finalUrl?: string; error: string };
+  }): void {
+    const { result } = input;
+    this.db.exec('BEGIN');
+    try {
+      this.db
+        .prepare(
+          `UPDATE tg_links SET final_url=?,response_json=?,snapshot_hash=?,extracted_text=?,
+             status=?,error=?,fetched_at=? WHERE id=?`,
+        )
+        .run(
+          result.finalUrl ?? null,
+          result.status === 'complete' ? result.responseJson : null,
+          result.status === 'complete' ? result.snapshotHash : null,
+          result.status === 'complete' ? result.text : null,
+          result.status,
+          result.status === 'unavailable' ? result.error : null,
+          input.fetchedAt,
+          input.linkId,
+        );
+      this.reindexMessageLinks(input.peerKey, input.messageId);
+      this.completeWorkItem(input.workItemId);
+      if (result.status === 'unavailable') {
+        this.db
+          .prepare(
+            `UPDATE tg_import_jobs SET failed_links=failed_links+1,updated_at=? WHERE peer_key=?`,
+          )
+          .run(now(), input.peerKey);
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private reindexMessageLinks(peerKey: string, messageId: number): void {
+    const message = this.db
+      .prepare(`SELECT text FROM tg_messages WHERE peer_key=? AND message_id=?`)
+      .get(peerKey, messageId) as unknown as { text: string } | undefined;
+    if (!message) return;
+    const linkText = this.db
+      .prepare(
+        `SELECT COALESCE(GROUP_CONCAT(extracted_text,' '),'') AS text FROM tg_links
+         WHERE peer_key=? AND message_id=? AND extracted_text IS NOT NULL`,
+      )
+      .get(peerKey, messageId) as unknown as { text: string };
+    this.db
+      .prepare(`DELETE FROM tg_message_fts WHERE peer_key=? AND message_id=?`)
+      .run(peerKey, messageId);
+    this.db
+      .prepare(`INSERT INTO tg_message_fts(peer_key,message_id,text,link_text) VALUES(?,?,?,?)`)
+      .run(peerKey, messageId, message.text, linkText.text);
+  }
+
+  private changed(sql: string, ...params: (string | number)[]): boolean {
+    return Number(this.db.prepare(sql).run(...params).changes) > 0;
   }
 
   markDeleted(peerKey: string | undefined, messageIds: number[], observedAt: string): void {
