@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { telegramConfigState } from './connectors/telegram/setupEnv.js';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
 export const DESKTOP = path.resolve(ROOT, '..');
@@ -35,6 +36,11 @@ const Env = z.object({
 });
 
 const env = Env.parse(process.env);
+const tgConfigState = telegramConfigState({
+  apiId: env.TG_API_ID,
+  apiHash: env.TG_API_HASH || undefined,
+  session: env.TG_SESSION || undefined,
+});
 
 const McpJson = z.object({
   command: z.string(),
@@ -65,6 +71,8 @@ export const cfg = {
   tgApiId: env.TG_API_ID,
   tgApiHash: env.TG_API_HASH || undefined,
   tgSession: env.TG_SESSION || undefined,
+  tgConfigState,
+  telegramArchiveDir: path.join(ROOT, 'archive', 'telegram'),
 
   desktopDir: DESKTOP,
   wikiDir: path.join(DESKTOP, 'wiki'),

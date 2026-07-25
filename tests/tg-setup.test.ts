@@ -1,0 +1,40 @@
+import './env.js';
+
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { test } from 'node:test';
+import {
+  telegramConfigState,
+  upsertTelegramEnv,
+  writeTelegramEnvAtomic,
+} from '../src/connectors/telegram/setupEnv.js';
+
+const values = { apiId: 12345, apiHash: 'hash-secret', session: 'session-secret' };
+
+test('telegram config state distinguishes absent, partial, and complete', () => {
+  assert.equal(telegramConfigState({}), 'not_configured');
+  assert.equal(telegramConfigState({ apiId: 1 }), 'partial');
+  assert.equal(telegramConfigState(values), 'configured');
+});
+
+test('env update preserves unrelated values, comments, and CRLF', () => {
+  const source = '# keep\r\nTELEGRAM_BOT_TOKEN=abc\r\nTG_API_ID=\r\n';
+  const result = upsertTelegramEnv(source, values);
+  assert.match(result, /^# keep\r\nTELEGRAM_BOT_TOKEN=abc\r\n/);
+  assert.match(result, /TG_API_ID=12345\r\n/);
+  assert.match(result, /TG_API_HASH=hash-secret\r\n/);
+  assert.match(result, /TG_SESSION=session-secret\r\n$/);
+});
+
+test('atomic writer changes only the destination after complete content exists', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'icarus-tg-env-'));
+  const envPath = path.join(dir, '.env');
+  writeFileSync(envPath, 'X=1\nTG_SESSION=old\n');
+  writeTelegramEnvAtomic(envPath, values);
+  assert.equal(
+    readFileSync(envPath, 'utf8'),
+    'X=1\nTG_SESSION=session-secret\nTG_API_ID=12345\nTG_API_HASH=hash-secret\n',
+  );
+});

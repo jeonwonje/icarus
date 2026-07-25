@@ -62,6 +62,17 @@ You need Node 24+, git, and a Claude subscription.
 
 The bot answers **only** the user id in `.env`. Everyone else gets silence.
 
+### Optional: archive personal Telegram chats
+
+1. Create API credentials at https://my.telegram.org → API development tools.
+2. Run `npm run tg-setup` and complete phone/code/2FA login locally.
+3. Send `/restart` to Icarus.
+4. Run `/tg`, search for a group or DM, review its message count, and confirm import.
+5. Use `/status` for connector health and `/tg` for detailed import progress.
+
+The personal-account connection is read-only. Icarus never sends, reacts, votes, joins,
+or marks messages read as you.
+
 ## Day to day
 
 | You do | It does |
