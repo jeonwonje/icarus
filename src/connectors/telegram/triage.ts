@@ -9,7 +9,10 @@ import type {
 
 const DEFAULT_QUIET_MS = 5 * 60_000;
 const FLUSH_INTERVAL_MS = 30_000;
-const TRIAGE_WINDOW = 40;
+/** Matches the legacy telegramUser MAX_BATCH burst cap. */
+const MAX_BATCH = 50;
+/** Must be >= MAX_BATCH so a flushed burst cannot be marked triaged without appearing in the prompt. */
+const TRIAGE_WINDOW = MAX_BATCH;
 
 const chatJobKey = (peerKey: string): string => peerKey.replace(/[^a-z0-9-]/gi, '-');
 
@@ -68,11 +71,12 @@ ${DIGEST_STYLE}`;
 }
 
 /**
- * Per-chat quiet-window bridge from live archive arrivals into the single agent lane.
- * Each chat gets its own queue jid so bursts never merge across chats.
+ * Per-chat quiet-window / max-batch bridge from live archive arrivals into the single
+ * agent lane. Each chat gets its own queue jid so bursts never merge across chats.
+ * Flushes when a chat is quiet for five minutes or accumulates MAX_BATCH notes.
  */
 export class TelegramTriageBridge {
-  private readonly due = new Map<string, { lastAt: number; dirty: boolean }>();
+  private readonly due = new Map<string, { lastAt: number; dirty: boolean; pendingCount: number }>();
   private readonly inFlight = new Set<string>();
   private timer: NodeJS.Timeout | undefined;
 
@@ -82,20 +86,28 @@ export class TelegramTriageBridge {
       submit: (job: Omit<TurnJob, 'enqueuedAt' | 'ac'>) => void;
       sendOwner: (text: string) => Promise<void>;
       quietMs?: number;
+      maxBatch?: number;
     },
   ) {}
 
   /** Marks a chat dirty; the quiet window restarts on every arrival. */
   noteMessage(peerKey: string, _messageId: number): void {
-    this.due.set(peerKey, { lastAt: Date.now(), dirty: true });
+    const prev = this.due.get(peerKey);
+    const pendingCount = (prev?.pendingCount ?? 0) + 1;
+    this.due.set(peerKey, { lastAt: Date.now(), dirty: true, pendingCount });
+    const maxBatch = this.deps.maxBatch ?? MAX_BATCH;
+    if (pendingCount >= maxBatch) void this.flushDue();
   }
 
   /** Polls due chats. A 30-second timer calls this while the bridge is started. */
   async flushDue(nowMs = Date.now()): Promise<void> {
     const quietMs = this.deps.quietMs ?? DEFAULT_QUIET_MS;
+    const maxBatch = this.deps.maxBatch ?? MAX_BATCH;
     for (const [peerKey, state] of this.due) {
       if (this.inFlight.has(peerKey)) continue;
-      if (nowMs - state.lastAt < quietMs) continue;
+      const quietElapsed = nowMs - state.lastAt >= quietMs;
+      const burstFull = state.pendingCount >= maxBatch;
+      if (!quietElapsed && !burstFull) continue;
       const range = this.deps.store.getUntriagedRange(peerKey);
       if (!range) {
         this.due.delete(peerKey);
@@ -119,7 +131,7 @@ export class TelegramTriageBridge {
 
   private submit(peerKey: string, throughId: number): void {
     this.inFlight.add(peerKey);
-    this.due.set(peerKey, { lastAt: Date.now(), dirty: false });
+    this.due.set(peerKey, { lastAt: Date.now(), dirty: false, pendingCount: 0 });
     const chat = this.deps.store.getChat(peerKey)!;
     const rows = this.deps.store.loadTriageWindow(peerKey, throughId, TRIAGE_WINDOW);
     this.deps.submit({
