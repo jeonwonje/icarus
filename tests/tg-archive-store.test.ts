@@ -208,6 +208,21 @@ test('triage failure alerting fires once after threshold consecutive failures', 
   assert.equal(store.shouldAlertTriageFailure('dm:1', 3), false);
 });
 
+test('triage failure alert does not re-fire for further failures in the same streak', () => {
+  const { store } = freshStore();
+  store.upsertDialog({ peerKey: 'dm:1', kind: 'dm', title: 'Alice', selected: true });
+  for (let i = 0; i < 3; i++) {
+    store.recordTriageResult('dm:1', 3, { status: 'error', finalText: '', error: 'boom' });
+  }
+  assert.equal(store.shouldAlertTriageFailure('dm:1', 3), true);
+  // Recording a 4th and 5th consecutive failure in the same streak must not reset
+  // `alerted`, so shouldAlertTriageFailure stays false for the rest of the streak.
+  store.recordTriageResult('dm:1', 3, { status: 'error', finalText: '', error: 'boom' });
+  assert.equal(store.shouldAlertTriageFailure('dm:1', 3), false);
+  store.recordTriageResult('dm:1', 3, { status: 'error', finalText: '', error: 'boom' });
+  assert.equal(store.shouldAlertTriageFailure('dm:1', 3), false);
+});
+
 test('chat selection, generic update state, and health reflect archive state', () => {
   const { store } = freshStore();
   store.upsertDialog({ peerKey: 'dm:1', kind: 'dm', title: 'Alice', selected: false });

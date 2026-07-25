@@ -402,10 +402,10 @@ export class TelegramArchiveStore {
   }
 
   getImport(peerKey: string): TelegramImportRow | undefined {
-    const row = this.db.prepare(`SELECT * FROM tg_import_jobs WHERE peer_key=?`).get(peerKey) as
-      | unknown
-      | undefined;
-    return row ? mapImportRow(row as RawImportRow) : undefined;
+    const row = this.db
+      .prepare(`SELECT * FROM tg_import_jobs WHERE peer_key=?`)
+      .get(peerKey) as unknown as RawImportRow | undefined;
+    return row ? mapImportRow(row) : undefined;
   }
 
   claimImport(at: string): TelegramImportRow | undefined {
@@ -417,8 +417,8 @@ export class TelegramArchiveStore {
       ORDER BY started_at LIMIT 1
     `,
       )
-      .get(at) as unknown | undefined;
-    return row ? mapImportRow(row as RawImportRow) : undefined;
+      .get(at) as unknown as RawImportRow | undefined;
+    return row ? mapImportRow(row) : undefined;
   }
 
   setImportState(peerKey: string, state: TelegramImportState, error?: string): void {
@@ -457,15 +457,14 @@ export class TelegramArchiveStore {
         ORDER BY id LIMIT 1
       `,
         )
-        .get(at) as unknown | undefined;
+        .get(at) as unknown as RawWorkItemRow | undefined;
       if (!row) {
         this.db.exec('COMMIT');
         return undefined;
       }
-      const raw = row as RawWorkItemRow;
-      this.db.prepare(`UPDATE tg_work_items SET state='in_progress' WHERE id=?`).run(raw.id);
+      this.db.prepare(`UPDATE tg_work_items SET state='in_progress' WHERE id=?`).run(row.id);
       this.db.exec('COMMIT');
-      return mapWorkItem({ ...raw, state: 'in_progress' });
+      return mapWorkItem({ ...row, state: 'in_progress' });
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
@@ -507,7 +506,7 @@ export class TelegramArchiveStore {
          WHERE peer_key=? AND message_id=? AND poll_json IS NOT NULL
          ORDER BY rowid DESC LIMIT 1`,
       )
-      .get(peerKey, messageId) as { poll_json: string } | undefined;
+      .get(peerKey, messageId) as unknown as { poll_json: string } | undefined;
     return row?.poll_json ?? null;
   }
 
@@ -579,7 +578,7 @@ export class TelegramArchiveStore {
   replaceReactions(peerKey: string, messageId: number, json: string, observedAt: string): void {
     const row = this.db
       .prepare(`SELECT text,entities_json,edited_at FROM tg_messages WHERE peer_key=? AND message_id=?`)
-      .get(peerKey, messageId) as
+      .get(peerKey, messageId) as unknown as
       | { text: string; entities_json: string; edited_at: string | null }
       | undefined;
     if (!row) return;
@@ -608,7 +607,7 @@ export class TelegramArchiveStore {
         `SELECT text,entities_json,reactions_json,edited_at FROM tg_messages
          WHERE peer_key=? AND message_id=?`,
       )
-      .get(peerKey, messageId) as
+      .get(peerKey, messageId) as unknown as
       | { text: string; entities_json: string; reactions_json: string; edited_at: string | null }
       | undefined;
     if (!row) return;
@@ -627,9 +626,9 @@ export class TelegramArchiveStore {
   }
 
   getUpdateState(stateKey: string): string | undefined {
-    const row = this.db.prepare(`SELECT value FROM tg_update_state WHERE state_key=?`).get(stateKey) as
-      | { value: string }
-      | undefined;
+    const row = this.db
+      .prepare(`SELECT value FROM tg_update_state WHERE state_key=?`)
+      .get(stateKey) as unknown as { value: string } | undefined;
     return row?.value;
   }
 
@@ -654,7 +653,7 @@ export class TelegramArchiveStore {
         `SELECT MIN(message_id) AS fromId,MAX(message_id) AS throughId,COUNT(1) AS n
          FROM tg_messages WHERE peer_key=? AND triage_pending=1`,
       )
-      .get(peerKey) as { fromId: number | null; throughId: number | null; n: number };
+      .get(peerKey) as unknown as { fromId: number | null; throughId: number | null; n: number };
     return row.n > 0 ? { fromId: row.fromId as number, throughId: row.throughId as number } : undefined;
   }
 
@@ -686,19 +685,22 @@ export class TelegramArchiveStore {
 
   recordTriageResult(peerKey: string, throughId: number, result: TurnResult): void {
     const key = `triage:${peerKey}`;
-    const prevRow = this.db.prepare(`SELECT value FROM tg_update_state WHERE state_key=?`).get(key) as
-      | { value: string }
-      | undefined;
+    const prevRow = this.db
+      .prepare(`SELECT value FROM tg_update_state WHERE state_key=?`)
+      .get(key) as unknown as { value: string } | undefined;
     const prev = prevRow
-      ? (JSON.parse(prevRow.value) as { consecutiveFailures: number })
-      : { consecutiveFailures: 0 };
+      ? (JSON.parse(prevRow.value) as { consecutiveFailures: number; alerted?: boolean })
+      : { consecutiveFailures: 0, alerted: false };
+    // An ongoing error streak keeps its `alerted` flag so shouldAlertTriageFailure only
+    // fires once per streak; only a non-error result clears it for the next streak.
     const consecutiveFailures = result.status === 'error' ? prev.consecutiveFailures + 1 : 0;
+    const alerted = result.status === 'error' ? (prev.alerted ?? false) : false;
     const value = JSON.stringify({
       throughId,
       status: result.status,
       error: result.error,
       consecutiveFailures,
-      alerted: false,
+      alerted,
     });
     const ts = now();
     this.db
@@ -713,9 +715,9 @@ export class TelegramArchiveStore {
 
   shouldAlertTriageFailure(peerKey: string, throughId: number): boolean {
     const key = `triage:${peerKey}`;
-    const row = this.db.prepare(`SELECT value FROM tg_update_state WHERE state_key=?`).get(key) as
-      | { value: string }
-      | undefined;
+    const row = this.db
+      .prepare(`SELECT value FROM tg_update_state WHERE state_key=?`)
+      .get(key) as unknown as { value: string } | undefined;
     if (!row) return false;
     const state = JSON.parse(row.value) as {
       throughId: number;
@@ -758,15 +760,15 @@ export class TelegramArchiveStore {
   }
 
   getHealth(): TelegramHealth {
-    const stored = this.db.prepare(`SELECT value FROM tg_update_state WHERE state_key='health'`).get() as
-      | { value: string }
-      | undefined;
+    const stored = this.db
+      .prepare(`SELECT value FROM tg_update_state WHERE state_key='health'`)
+      .get() as unknown as { value: string } | undefined;
     const parsed = stored
       ? (JSON.parse(stored.value) as { state: TelegramHealthState; error?: string })
       : { state: 'not_configured' as TelegramHealthState, error: undefined };
-    const selected = this.db.prepare(`SELECT COUNT(1) AS n FROM tg_chats WHERE selected=1`).get() as {
-      n: number;
-    };
+    const selected = this.db
+      .prepare(`SELECT COUNT(1) AS n FROM tg_chats WHERE selected=1`)
+      .get() as unknown as { n: number };
     const active = this.db
       .prepare(
         `
@@ -776,13 +778,13 @@ export class TelegramArchiveStore {
       ORDER BY j.started_at LIMIT 1
     `,
       )
-      .get() as { title: string; imported: number; total: number | null } | undefined;
+      .get() as unknown as { title: string; imported: number; total: number | null } | undefined;
     const timestamps = this.db
       .prepare(
         `SELECT MAX(last_live_at) AS lastLiveAt,MAX(last_reconciled_at) AS lastReconciledAt
          FROM tg_chats WHERE selected=1`,
       )
-      .get() as { lastLiveAt: string | null; lastReconciledAt: string | null };
+      .get() as unknown as { lastLiveAt: string | null; lastReconciledAt: string | null };
     return {
       state: parsed.state,
       selectedChats: selected.n,
