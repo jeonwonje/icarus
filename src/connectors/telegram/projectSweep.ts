@@ -10,12 +10,14 @@ export interface ProjectSweepDeps {
     wikiProject: string;
     evidence: string;
   }) => Promise<void>;
+  markNotified?: (id: number) => void;
 }
 
 async function dmProposal(
   proposal: ProjectProposal,
   getChatTitle: ProjectSweepDeps['getChatTitle'],
   notifyProposal: ProjectSweepDeps['notifyProposal'],
+  markNotified?: ProjectSweepDeps['markNotified'],
 ): Promise<void> {
   const chatTitle = getChatTitle(proposal.peerKey);
   if (!chatTitle) return;
@@ -25,6 +27,7 @@ async function dmProposal(
     wikiProject: proposal.wikiProject,
     evidence: proposal.evidence,
   });
+  markNotified?.(proposal.id);
 }
 
 /** Weekly sweep: propose wiki mappings for unmapped selected chats. Returns new proposal count. */
@@ -32,7 +35,12 @@ export async function runTelegramProjectSweep(overrides?: ProjectSweepDeps): Pro
   if (overrides) {
     const proposals = overrides.sweep();
     for (const proposal of proposals) {
-      await dmProposal(proposal, overrides.getChatTitle, overrides.notifyProposal);
+      await dmProposal(
+        proposal,
+        overrides.getChatTitle,
+        overrides.notifyProposal,
+        overrides.markNotified,
+      );
     }
     return proposals.length;
   }

@@ -187,6 +187,7 @@ export function applyApproval(input: {
 
   mkdirSync(path.dirname(briefFull), { recursive: true });
   writeFileSync(briefFull, markdown, 'utf8');
+  upsertMemoryPointer(input.memoryDir, proposal.wikiProject, chat.title);
   try {
     input.projects.approveProposal(input.proposalId, briefRel);
   } catch (error) {
@@ -197,6 +198,5 @@ export function applyApproval(input: {
     }
     throw error;
   }
-  upsertMemoryPointer(input.memoryDir, proposal.wikiProject, chat.title);
   return { briefPath: briefRel };
 }

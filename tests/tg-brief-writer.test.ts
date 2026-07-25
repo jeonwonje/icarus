@@ -1,7 +1,7 @@
 import './env.js';
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -86,6 +86,57 @@ test('applyApproval writes brief under wiki project and one memory line', () => 
     true,
   );
   assert.ok((memory2.match(/wiki\/morianlabs/g) ?? []).length <= 1);
+});
+
+test('applyApproval writes memory before approve; approve failure leaves memory, deletes brief', () => {
+  const wiki = mkdtempSync(path.join(tmpdir(), 'wiki-'));
+  const memoryDir = path.join(wiki, 'memory');
+  mkdirSync(path.join(wiki, 'morianlabs'), { recursive: true });
+  mkdirSync(memoryDir, { recursive: true });
+  writeFileSync(path.join(memoryDir, 'MEMORY.md'), '# Memory index\n\n');
+  const db = new DatabaseSync(':memory:');
+  migrateDb(db);
+  const archive = new TelegramArchiveStore(db);
+  archive.upsertDialog({
+    peerKey: 'group:1',
+    kind: 'group',
+    title: 'Morian Labs',
+    selected: true,
+  });
+  const projects = new TelegramProjectStore(db);
+  const proposal = projects.enqueueProposal({
+    peerKey: 'group:1',
+    wikiProject: 'morianlabs',
+    evidence: 'title',
+    score: 1,
+    fingerprint: 'fp',
+  })!;
+  const query = new TelegramArchiveQuery(archive);
+  const originalApprove = projects.approveProposal.bind(projects);
+  projects.approveProposal = () => {
+    throw new Error('approve failed');
+  };
+  assert.throws(
+    () =>
+      applyApproval({
+        proposalId: proposal.id,
+        projects,
+        query,
+        archive,
+        wikiDir: wiki,
+        memoryDir,
+      }),
+    /approve failed/,
+  );
+  projects.approveProposal = originalApprove;
+  assert.equal(projects.getProposal(proposal.id)?.state, 'pending');
+  assert.equal(projects.getMapping('group:1'), undefined);
+  const memory = readFileSync(path.join(memoryDir, 'MEMORY.md'), 'utf8');
+  assert.match(memory, /morianlabs/);
+  assert.equal(
+    existsSync(path.join(wiki, 'morianlabs/telegram-morian-labs.md')),
+    false,
+  );
 });
 
 test('reject leaves wiki and memory untouched', () => {

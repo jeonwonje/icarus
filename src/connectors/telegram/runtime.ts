@@ -101,6 +101,7 @@ export class TelegramArchiveRuntime {
         evidence: proposal.evidence,
       });
       await notifyKeyboard(rendered.text, rendered.keyboard);
+      projectStore.markProposalNotified(proposal.id);
     };
     const manager = new TelegramSyncManager({
       adapter,
@@ -240,6 +241,7 @@ export class TelegramArchiveRuntime {
       evidence: proposal.evidence,
     });
     await this.notifyKeyboard(rendered.text, rendered.keyboard);
+    this.projectStore.markProposalNotified(proposal.id);
   }
 
   async approveMapping(id: number): Promise<string> {

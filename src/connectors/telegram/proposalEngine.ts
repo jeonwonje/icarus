@@ -155,13 +155,10 @@ export class ProposalEngine {
   }
 
   sweep(): ProjectProposal[] {
-    const created: ProjectProposal[] = [];
     for (const chat of this.deps.archive.listSelectedChats()) {
       if (this.deps.projects.hasMapping(chat.peerKey)) continue;
-      const hadPending = this.deps.projects.getPendingForPeer(chat.peerKey);
-      const proposal = this.considerChat(chat.peerKey);
-      if (proposal && !hadPending) created.push(proposal);
+      this.considerChat(chat.peerKey);
     }
-    return created;
+    return this.deps.projects.listUnnotifiedPending();
   }
 }

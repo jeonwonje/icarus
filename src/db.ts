@@ -248,6 +248,12 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_tg_project_mappings_project ON tg_project_mappings(wiki_project);
   `,
+  `
+  ALTER TABLE tg_project_proposals ADD COLUMN notified_at TEXT;
+  CREATE INDEX idx_tg_project_proposals_unnotified
+    ON tg_project_proposals(state, notified_at)
+    WHERE state='pending' AND notified_at IS NULL;
+  `,
 ];
 
 export let db: DatabaseSync;

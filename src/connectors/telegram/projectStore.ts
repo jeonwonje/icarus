@@ -13,6 +13,7 @@ export interface ProjectProposal {
   state: ProposalState;
   createdAt: string;
   resolvedAt?: string;
+  notifiedAt?: string;
 }
 
 export interface ProjectMapping {
@@ -33,6 +34,7 @@ interface ProposalRow {
   state: ProposalState;
   created_at: string;
   resolved_at: string | null;
+  notified_at: string | null;
 }
 
 interface MappingRow {
@@ -53,6 +55,7 @@ const mapProposal = (row: ProposalRow): ProjectProposal => ({
   state: row.state,
   createdAt: row.created_at,
   resolvedAt: row.resolved_at ?? undefined,
+  notifiedAt: row.notified_at ?? undefined,
 });
 
 const mapMapping = (row: MappingRow): ProjectMapping => ({
@@ -93,7 +96,7 @@ export class TelegramProjectStore {
   getProposal(id: number): ProjectProposal | undefined {
     const row = this.db
       .prepare(
-        `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at
+        `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at, notified_at
          FROM tg_project_proposals WHERE id=?`,
       )
       .get(id) as unknown as ProposalRow | undefined;
@@ -103,7 +106,7 @@ export class TelegramProjectStore {
   getPendingForPeer(peerKey: string): ProjectProposal | undefined {
     const row = this.db
       .prepare(
-        `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at
+        `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at, notified_at
          FROM tg_project_proposals WHERE peer_key=? AND state='pending' LIMIT 1`,
       )
       .get(peerKey) as unknown as ProposalRow | undefined;
@@ -114,17 +117,33 @@ export class TelegramProjectStore {
     const rows = state
       ? (this.db
           .prepare(
-            `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at
+            `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at, notified_at
              FROM tg_project_proposals WHERE state=? ORDER BY created_at`,
           )
           .all(state) as unknown as ProposalRow[])
       : (this.db
           .prepare(
-            `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at
+            `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at, notified_at
              FROM tg_project_proposals ORDER BY created_at`,
           )
           .all() as unknown as ProposalRow[]);
     return rows.map(mapProposal);
+  }
+
+  listUnnotifiedPending(): ProjectProposal[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, peer_key, wiki_project, evidence, score, fingerprint, state, created_at, resolved_at, notified_at
+         FROM tg_project_proposals WHERE state='pending' AND notified_at IS NULL ORDER BY created_at`,
+      )
+      .all() as unknown as ProposalRow[];
+    return rows.map(mapProposal);
+  }
+
+  markProposalNotified(id: number): void {
+    this.db
+      .prepare(`UPDATE tg_project_proposals SET notified_at=? WHERE id=? AND state='pending'`)
+      .run(now(), id);
   }
 
   /**
