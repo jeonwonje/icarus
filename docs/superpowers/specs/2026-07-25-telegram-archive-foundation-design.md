@@ -124,6 +124,11 @@ At boot, partial configuration is an explicit unhealthy state rather than silent
 disabled. Completely absent configuration remains "not configured." Authorization
 failure sends one deduplicated owner alert and leaves the archive readable.
 
+README setup and day-to-day sections document the personal-account feature separately
+from the BotFather owner bot: create Telegram API credentials, run `npm run tg-setup`,
+restart, select chats with `/tg`, and verify status. Setup must not rely on `.env.example`
+comments or an error message as its only documentation.
+
 ## Chat selection and management
 
 `/tg` is available only when the personal client is authorized. It shows connector
@@ -147,6 +152,11 @@ health and selected/importing chats first, then paginated eligible dialogs.
 Per-chat status includes import phase, available/imported message counts, discovered and
 downloaded media bytes, failed media/link counts, oldest imported message time, last live
 update, last verified update position, and the next retry time if paused by Telegram.
+
+The `/status` summary distinguishes `not configured`, `partial config`, `connecting`,
+`connected`, `temporarily offline`, and `authorization failed`. When configured, it also
+shows selected-chat count, active import progress, last live event, and last successful
+reconciliation. It does not treat session-string presence as connection health.
 
 ## Storage
 
@@ -263,6 +273,12 @@ Telegram does not promise infinite recovery of every ephemeral update. The UI th
 reports a last verified update position and any unresolved gap. It must not claim exact
 mirroring when Telegram can no longer supply missing state.
 
+Connection-state changes update health immediately. Transient disconnects enter a
+persisted reconnect loop and remain visible as temporarily offline; they do not wait for
+an unrelated `/tg` call to be discovered. Authorization failure stops reconnect attempts
+and alerts once. Successful reconnect always runs difference recovery before health
+returns to connected.
+
 ## Live triage integration
 
 The existing five-minute/50-message burst policy remains for newly observed live
@@ -276,6 +292,17 @@ and have not previously been triaged. Edits, reactions, and poll changes may upd
 open burst; they do not independently DM Jeon unless a future design explicitly adds
 that behavior.
 
+Every chat uses a distinct queue identity, `job:tg-triage:<stable-chat-key>`. This is
+required because the global queue coalesces pending jobs with the same identity. Batches
+from the same chat may coalesce in order; batches from different chats must never merge
+into one agent turn. The human-readable turn kind remains `job:tg-triage`, with chat
+identity stored separately for status and diagnostics.
+
+Each triage attempt records per-chat success, failure, and last-triaged message watermark.
+A failed triage remains visible under `/tg`; a terminal failure sends one deduplicated
+owner alert containing the chat and archived batch range. The archive and watermark make
+retry safe without replaying already successful batches.
+
 ## Progress and owner notifications
 
 Detailed state lives under `/tg`. Automatic DMs are limited to:
@@ -284,7 +311,7 @@ Detailed state lives under `/tg`. Automatic DMs are limited to:
 - import completed, including messages, media bytes, link snapshots, and failures;
 - authorization revoked or credentials invalid;
 - import paused for low disk space;
-- a permanent job-level failure requiring action.
+- a permanent import or live-triage failure requiring action.
 
 Transient errors, ordinary flood-waits, page progress, and individual unavailable links
 do not generate DMs.
@@ -342,10 +369,14 @@ deletes blobs still referenced by another message.
 - FTS inserts, edits, and deleted markers remain transactionally consistent.
 - Page cursors advance only with committed pages.
 - Duplicate live/backfill events do not duplicate rows, versions, blobs, or triage.
+- Simultaneous bursts from different chats receive different queue identities and never
+  coalesce; multiple pending bursts from one chat preserve order when coalesced.
 - Media hashing, content deduplication, partial-file cleanup, and low-disk pauses work.
 - Link deadlines, size limits, redirects, deduplication, and permanent failures work.
 - `/tg` search, pagination, status, confirmation, and destructive confirmation render
   within Telegram callback limits.
+- `/status` distinguishes configuration, authorization, and live connection states
+  without exposing credentials.
 
 ### Integration tests
 
@@ -356,6 +387,8 @@ A fake `TelegramAdapter` drives:
 - global and supergroup difference recovery;
 - flood-wait persistence and resume;
 - targeted fetch for an unknown edited/deleted message;
+- transient disconnect, reconnect, and authorization-revocation state transitions;
+- simultaneous triage flushes from two chats without cross-chat prompt merging;
 - media failure without poisoning the parent import;
 - cancel, resume, retry, and blob garbage collection.
 
@@ -377,12 +410,15 @@ reactions, a poll, files, photos, and external links.
 8. Confirm no message content from an unselected chat exists in the database or archive.
 9. Confirm historical rows produced no triage DMs and live bursts still follow the
    existing quiet-window behavior.
+10. Flush live bursts from the DM and group at the same time; confirm they produce
+    separate triage turns and per-chat status.
 
 ## Acceptance criteria
 
 Phase 1 is complete when:
 
 - guided setup produces a validated live connection without manual secret copying;
+- README documents setup, selection, status, and restart from a clean install;
 - any eligible group or DM can be found, selected, and confirmed through `/tg`;
 - a medium-scale full-history import survives restarts and rate limits;
 - all available Telegram-hosted media is retained subject only to disk availability and
@@ -392,6 +428,7 @@ Phase 1 is complete when:
 - ongoing live state is reconciled after ordinary downtime, with unresolved gaps shown
   honestly;
 - unselected chat content is never persisted;
+- live triage batches from different chats never share an agent turn;
 - progress and actionable failures are visible without noisy DMs;
 - typecheck, selftest, automated tests, and the manual acceptance flow pass.
 
