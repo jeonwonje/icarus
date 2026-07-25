@@ -1287,6 +1287,72 @@ export class TelegramArchiveStore {
     return rows.map(mapMessageRow).reverse();
   }
 
+  /** Media and link rows for a triage window, keyed by the same message ids. */
+  loadTriageAttachments(
+    peerKey: string,
+    messageIds: readonly number[],
+  ): {
+    media: {
+      messageId: number;
+      mediaKey: string;
+      kind: string;
+      filename?: string;
+      blobHash?: string;
+      status: string;
+    }[];
+    links: {
+      messageId: number;
+      url: string;
+      status: string;
+      snapshotHash?: string;
+    }[];
+  } {
+    if (messageIds.length === 0) return { media: [], links: [] };
+    const placeholders = messageIds.map(() => '?').join(',');
+    const media = this.db
+      .prepare(
+        `SELECT message_id,media_key,kind,filename,blob_hash,status
+         FROM tg_media WHERE peer_key=? AND message_id IN (${placeholders})
+         ORDER BY message_id,media_key`,
+      )
+      .all(peerKey, ...messageIds) as unknown as {
+      message_id: number;
+      media_key: string;
+      kind: string;
+      filename: string | null;
+      blob_hash: string | null;
+      status: string;
+    }[];
+    const links = this.db
+      .prepare(
+        `SELECT message_id,original_url,status,snapshot_hash
+         FROM tg_links WHERE peer_key=? AND message_id IN (${placeholders})
+         ORDER BY message_id,id`,
+      )
+      .all(peerKey, ...messageIds) as unknown as {
+      message_id: number;
+      original_url: string;
+      status: string;
+      snapshot_hash: string | null;
+    }[];
+    return {
+      media: media.map((row) => ({
+        messageId: row.message_id,
+        mediaKey: row.media_key,
+        kind: row.kind,
+        filename: row.filename ?? undefined,
+        blobHash: row.blob_hash ?? undefined,
+        status: row.status,
+      })),
+      links: links.map((row) => ({
+        messageId: row.message_id,
+        url: row.original_url,
+        status: row.status,
+        snapshotHash: row.snapshot_hash ?? undefined,
+      })),
+    };
+  }
+
   markTriageEligible(peerKey: string, messageId: number): void {
     this.db
       .prepare(`UPDATE tg_messages SET triage_pending=1 WHERE peer_key=? AND message_id=?`)

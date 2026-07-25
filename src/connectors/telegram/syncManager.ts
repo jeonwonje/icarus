@@ -115,7 +115,11 @@ export interface TelegramSyncDeps {
    * of it is ever persisted.
    */
   session?: string;
-  /** Called for messages that are new to this account, never for backfill or replay. */
+  /**
+   * Called for messages newly eligible for live triage (live arrivals, or difference replay
+   * above the persisted watermark). Wire `TelegramTriageBridge.noteMessage` here. Never called
+   * for backfill, edits, reactions, polls, or replay at/below the watermark.
+   */
   onNewLiveMessage?: (peerKey: string, messageId: number) => void;
 }
 

@@ -182,3 +182,20 @@ export async function drain(manager: TelegramSyncManager, limit = 50): Promise<n
   }
   throw new Error(`sync lane did not settle within ${limit} cycles`);
 }
+
+/** Selected chats with live-origin messages already marked triage-pending. */
+export function makeStoreWithLiveMessages(
+  rows: [peerKey: string, messageId: number, text: string][],
+): TelegramArchiveStore {
+  const { store } = freshArchive();
+  for (const [peerKey, messageId, text] of rows) {
+    const kind = peerKey.startsWith('dm:')
+      ? 'dm'
+      : peerKey.startsWith('supergroup:')
+        ? 'supergroup'
+        : 'group';
+    store.upsertDialog({ peerKey, kind, title: peerKey, selected: true });
+    store.applyMessages([message(peerKey, messageId, text)], 'live');
+  }
+  return store;
+}
