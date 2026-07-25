@@ -15,6 +15,27 @@ export function telegramConfigState(values: TelegramEnvValues): TelegramConfigSt
   return present === 0 ? 'not_configured' : present === 3 ? 'configured' : 'partial';
 }
 
+function trailingEnvComment(valueAndSuffix: string): string {
+  let quote: '"' | "'" | undefined;
+  for (let index = 0; index < valueAndSuffix.length; index += 1) {
+    const char = valueAndSuffix[index];
+    if (quote) {
+      if (char === '\\') index += 1;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if (char === '#') {
+      let commentStart = index;
+      while (commentStart > 0 && /\s/.test(valueAndSuffix[commentStart - 1])) {
+        commentStart -= 1;
+      }
+      return valueAndSuffix.slice(commentStart);
+    }
+  }
+  return '';
+}
+
 export function upsertTelegramEnv(source: string, complete: Required<TelegramEnvValues>): string {
   const newline = source.includes('\r\n') ? '\r\n' : '\n';
   const hasTerminalNewline = /\r?\n$/.test(source);
@@ -27,17 +48,15 @@ export function upsertTelegramEnv(source: string, complete: Required<TelegramEnv
   const lines = source.length === 0 ? [] : source.replace(/\r?\n$/, '').split(/\r?\n/);
   const output: string[] = [];
   for (const line of lines) {
-    const match = line.match(
-      /^(\s*(TG_API_ID|TG_API_HASH|TG_SESSION)\s*=\s*)(.*?)(\s+#.*)?$/,
-    );
+    const match = line.match(/^(\s*(TG_API_ID|TG_API_HASH|TG_SESSION)\s*=\s*)(.*)$/);
     if (!match) {
       output.push(line);
       continue;
     }
-    const [, assignment, key, , comment = ''] = match;
+    const [, assignment, key, valueAndSuffix] = match;
     if (seen.has(key)) continue;
     seen.add(key);
-    output.push(`${assignment}${replacements[key]}${comment}`);
+    output.push(`${assignment}${replacements[key]}${trailingEnvComment(valueAndSuffix)}`);
   }
   for (const key of ['TG_API_ID', 'TG_API_HASH', 'TG_SESSION']) {
     if (!seen.has(key)) output.push(`${key}=${replacements[key]}`);

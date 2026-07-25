@@ -33,6 +33,16 @@ test('env update preserves inline comments on Telegram assignments', () => {
   assert.match(result, /TG_API_HASH=hash-secret # keep\n/);
 });
 
+test('env update preserves unquoted hash comments without whitespace', () => {
+  const result = upsertTelegramEnv('TG_API_HASH=old# keep\n', { ...values, apiHash: 'new' });
+  assert.match(result, /TG_API_HASH=new# keep\n/);
+});
+
+test('env update preserves quoted hashes and trailing comments', () => {
+  const result = upsertTelegramEnv('TG_API_HASH="old#value" # keep\n', { ...values, apiHash: 'new' });
+  assert.match(result, /TG_API_HASH=new # keep\n/);
+});
+
 test('env update preserves a missing terminal newline', () => {
   const source = 'TG_API_ID=old\nTG_API_HASH=old\nTG_SESSION=old';
   assert.equal(
