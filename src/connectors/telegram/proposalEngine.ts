@@ -14,12 +14,32 @@ export interface MatchResult {
 const slugSegments = (slug: string): string[] =>
   slug.split('-').filter((s) => s.length >= 4);
 
-const matchesSlugOrSegment = (token: string, slug: string): boolean => {
+const exactSlugOrSegmentMatch = (token: string, slug: string): boolean => {
   if (token === slug) return true;
-  for (const segment of slugSegments(slug)) {
-    if (token === segment) return true;
-    if (segment.includes(token)) return true;
-  }
+  return slugSegments(slug).some((segment) => token === segment);
+};
+
+const compoundSlugSubstringHits = (slug: string, chatTokens: string[]): string[] => {
+  if (slug.includes('-')) return [];
+  return chatTokens.filter((t) => slug.includes(t));
+};
+
+const compoundSlugMatches = (slug: string, chatTokens: string[]): boolean => {
+  const hits = compoundSlugSubstringHits(slug, chatTokens);
+  if (hits.length >= 2) return true;
+  const ordered = chatTokens.filter((t) => hits.includes(t));
+  if (ordered.join('') === slug) return true;
+  const sorted = [...hits].sort();
+  return sorted.join('') === slug;
+};
+
+const tokenMatchesSlug = (
+  token: string,
+  slug: string,
+  chatTokens: string[],
+): boolean => {
+  if (exactSlugOrSegmentMatch(token, slug)) return true;
+  if (!compoundSlugMatches(slug, chatTokens)) return false;
   return slug.includes(token);
 };
 
@@ -45,7 +65,7 @@ export function matchChatToProjects(input: {
 
     for (const token of chatTokens) {
       let matched = false;
-      if (matchesSlugOrSegment(token, project.slug)) {
+      if (tokenMatchesSlug(token, project.slug, chatTokens)) {
         slugHit = true;
         matched = true;
       } else if (titleTokens.includes(token)) {

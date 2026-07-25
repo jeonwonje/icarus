@@ -8,7 +8,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
 import { TelegramProjectStore } from '../src/connectors/telegram/projectStore.js';
-import { ProposalEngine } from '../src/connectors/telegram/proposalEngine.js';
+import {
+  matchChatToProjects,
+  ProposalEngine,
+} from '../src/connectors/telegram/proposalEngine.js';
 import { listWikiProjects, tokenize } from '../src/connectors/telegram/wikiProjects.js';
 import { migrateDb } from '../src/db.js';
 
@@ -50,6 +53,19 @@ test('considerChat enqueues when title overlaps project slug', () => {
   assert.ok(created);
   assert.equal(created.wikiProject, 'morianlabs');
   assert.equal(engine.considerChat('group:1'), null); // pending exists
+});
+
+test('matchChatToProjects rejects weak single-token slug substring matches', () => {
+  const projects = [
+    { slug: 'morianlabs', title: 'Morian Duck' },
+    { slug: 'sodion-atlas', title: 'Battery atlas' },
+  ];
+  assert.equal(
+    matchChatToProjects({ title: 'Morian Labs build chat', projects })?.wikiProject,
+    'morianlabs',
+  );
+  assert.equal(matchChatToProjects({ title: 'Labs chat', projects }), null);
+  assert.equal(matchChatToProjects({ title: 'Data dump', projects }), null);
 });
 
 test('sweep skips rejected fingerprint', () => {
