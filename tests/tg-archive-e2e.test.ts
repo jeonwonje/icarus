@@ -249,6 +249,9 @@ test('selected chats import fully, survive restart, reconcile, and remain isolat
     [message('dm:1', 6, 'live dm'), message('supergroup:2', 6, 'live group')],
     'live',
   );
+  // Mirror syncManager: apply never sets triage_pending; eligibility is explicit.
+  assert.equal(store.markTriageEligible('dm:1', 6), true);
+  assert.equal(store.markTriageEligible('supergroup:2', 6), true);
   const submittedJobs: Omit<TurnJob, 'enqueuedAt' | 'ac'>[] = [];
   const triage = new TelegramTriageBridge({
     store,

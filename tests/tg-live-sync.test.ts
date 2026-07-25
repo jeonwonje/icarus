@@ -129,6 +129,40 @@ test('difference replay only triages messages newer than the live watermark', as
   await h.manager.stop();
 });
 
+test('difference replay does not re-triage a message already seen live', async () => {
+  const h = makeLiveHarness({
+    globalDifferences: [
+      {
+        events: [{ type: 'message', message: message('dm:1', 2, 'from difference') }],
+        globalState: '{"pts":2}',
+        complete: true,
+        gap: false,
+      },
+    ],
+  });
+  await h.manager.start();
+  await h.adapter.emit({ type: 'message', message: message('dm:1', 1, 'earlier') });
+  await h.adapter.emit({ type: 'message', message: message('dm:1', 2, 'live') });
+  h.store.markTriagedThrough('dm:1', 2, '2026-01-01T00:10:00.000Z');
+  assert.equal(triagePending(h.db), 0);
+  // Catch-up floors are snapshotted at reconcile start. Lowering the watermark recreates the
+  // mid-catch-up case where a live arrival (and its triage) raced ahead of difference replay.
+  h.store.setUpdateState('live:dm:1', '1');
+  h.newLive.length = 0;
+
+  await h.adapter.disconnect();
+  await h.adapter.connect();
+  await h.manager.waitForReconciliation();
+
+  const row = h.db
+    .prepare(`SELECT triage_pending,triaged_at FROM tg_messages WHERE message_id=2`)
+    .get() as unknown as { triage_pending: number; triaged_at: string | null };
+  assert.equal(row.triage_pending, 0);
+  assert.ok(row.triaged_at);
+  assert.deepEqual(h.newLive, []);
+  await h.manager.stop();
+});
+
 test('an unresolved gap is recorded once and recovers current history instead of retrying', async () => {
   const h = makeLiveHarness({
     globalDifferences: [

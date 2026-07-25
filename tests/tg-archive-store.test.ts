@@ -70,21 +70,28 @@ test('deletion retains content and marks the observation time', () => {
   );
 });
 
-test('backfill never sets triage_pending; live messages do', () => {
+test('applyMessages never sets triage_pending; markTriageEligible does', () => {
   const { db, store } = freshStore();
   store.upsertDialog({ peerKey: 'dm:1', kind: 'dm', title: 'Alice', selected: true });
   store.applyMessages([{ ...makeMessage('backfilled'), messageId: 1 }], 'backfill');
   store.applyMessages([{ ...makeMessage('lively'), messageId: 2 }], 'live');
-  const rows = (
+  const before = (
     db.prepare('SELECT message_id,triage_pending FROM tg_messages ORDER BY message_id').all() as {
       message_id: number;
       triage_pending: number;
     }[]
   ).map((r) => ({ ...r }));
-  assert.deepEqual(rows, [
+  assert.deepEqual(before, [
     { message_id: 1, triage_pending: 0 },
-    { message_id: 2, triage_pending: 1 },
+    { message_id: 2, triage_pending: 0 },
   ]);
+  assert.equal(store.markTriageEligible('dm:1', 2), true);
+  assert.equal(
+    (db.prepare('SELECT triage_pending FROM tg_messages WHERE message_id=2').get() as {
+      triage_pending: number;
+    }).triage_pending,
+    1,
+  );
 });
 
 test('recordHistoryPage applies messages and import progress in one transaction', () => {
@@ -178,6 +185,40 @@ test('replaceReactions and replacePoll preserve version history without touching
   assert.equal(versionCount.n, 3);
 });
 
+test('stale backfill does not overwrite a newer live edit', () => {
+  const { db, store } = freshStore();
+  store.upsertDialog({ peerKey: 'dm:1', kind: 'dm', title: 'Alice', selected: true });
+  store.createImport('dm:1', 1);
+  store.applyMessages([makeMessage('original')], 'live');
+  store.applyMessages([makeMessage('edited', '2026-01-01T00:02:00.000Z')], 'live');
+  // History page fetched before the edit (or simply older) commits after the live edit.
+  store.recordHistoryPage('dm:1', [makeMessage('original')], null);
+  assert.equal(store.getMessage('dm:1', 7)?.text, 'edited');
+  assert.equal(
+    (db.prepare(`SELECT text,edited_at FROM tg_messages WHERE message_id=7`).get() as {
+      text: string;
+      edited_at: string;
+    }).edited_at,
+    '2026-01-01T00:02:00.000Z',
+  );
+  const versionTexts = (
+    db
+      .prepare(`SELECT text FROM tg_message_versions WHERE message_id=7 ORDER BY observed_at, rowid`)
+      .all() as { text: string }[]
+  ).map((row) => row.text);
+  assert.deepEqual(versionTexts, ['original', 'edited']);
+  assert.equal(
+    (db.prepare(`SELECT text FROM tg_message_fts WHERE tg_message_fts MATCH 'edited'`).all() as unknown[])
+      .length,
+    1,
+  );
+  assert.equal(
+    (db.prepare(`SELECT COUNT(1) AS n FROM tg_message_fts WHERE tg_message_fts MATCH 'original'`)
+      .get() as { n: number }).n,
+    0,
+  );
+});
+
 test('triage window loads context, and marking through clears the pending flag', () => {
   const { store } = freshStore();
   store.upsertDialog({ peerKey: 'dm:1', kind: 'dm', title: 'Alice', selected: true });
@@ -185,13 +226,26 @@ test('triage window loads context, and marking through clears the pending flag',
     [1, 2, 3].map((id) => ({ ...makeMessage(`m${id}`), messageId: id })),
     'live',
   );
+  for (const id of [1, 2, 3]) assert.equal(store.markTriageEligible('dm:1', id), true);
   assert.deepEqual(store.getUntriagedRange('dm:1'), { fromId: 1, throughId: 3 });
   const window = store.loadTriageWindow('dm:1', 3, 2);
   assert.deepEqual(window.map((r) => r.messageId), [2, 3]);
   store.markTriagedThrough('dm:1', 3, '2026-01-01T00:10:00.000Z');
   assert.equal(store.getUntriagedRange('dm:1'), undefined);
-  store.markTriageEligible('dm:1', 2);
-  assert.deepEqual(store.getUntriagedRange('dm:1'), { fromId: 2, throughId: 2 });
+  // Already-triaged rows must not be re-opened for a duplicate owner DM.
+  assert.equal(store.markTriageEligible('dm:1', 2), false);
+  assert.equal(store.getUntriagedRange('dm:1'), undefined);
+});
+
+test('markTriageEligible is a no-op when already pending or already triaged', () => {
+  const { store } = freshStore();
+  store.upsertDialog({ peerKey: 'dm:1', kind: 'dm', title: 'Alice', selected: true });
+  store.applyMessages([{ ...makeMessage('live'), messageId: 2 }], 'live');
+  assert.equal(store.markTriageEligible('dm:1', 2), true);
+  assert.equal(store.markTriageEligible('dm:1', 2), false);
+  store.markTriagedThrough('dm:1', 2, '2026-01-01T00:10:00.000Z');
+  assert.equal(store.markTriageEligible('dm:1', 2), false);
+  assert.equal(store.getUntriagedRange('dm:1'), undefined);
 });
 
 test('triage failure alerting fires once after threshold consecutive failures', () => {

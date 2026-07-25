@@ -196,6 +196,7 @@ export function makeStoreWithLiveMessages(
         : 'group';
     store.upsertDialog({ peerKey, kind, title: peerKey, selected: true });
     store.applyMessages([message(peerKey, messageId, text)], 'live');
+    store.markTriageEligible(peerKey, messageId);
   }
   return store;
 }

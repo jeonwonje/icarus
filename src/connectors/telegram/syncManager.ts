@@ -116,9 +116,10 @@ export interface TelegramSyncDeps {
    */
   session?: string;
   /**
-   * Called for messages newly eligible for live triage (live arrivals, or difference replay
-   * above the persisted watermark). Wire `TelegramTriageBridge.noteMessage` here. Never called
-   * for backfill, edits, reactions, polls, or replay at/below the watermark.
+   * Called when a message newly becomes triage-pending (live arrivals, or difference replay
+   * above the persisted watermark that was not already triaged). Wire
+   * `TelegramTriageBridge.noteMessage` here. Never called for backfill, edits, reactions, polls,
+   * replay at/below the watermark, or a message that is already pending or already triaged.
    */
   onNewLiveMessage?: (peerKey: string, messageId: number) => void;
 }
@@ -461,8 +462,10 @@ export class TelegramSyncManager {
         if (!this.deps.store.isSelected(peerKey)) return undefined;
         this.deps.store.applyMessages([event.message], origin);
         if (event.type === 'edit') return undefined;
-        if (this.isNewForTriage(peerKey, messageId, origin, floors)) {
-          this.deps.store.markTriageEligible(peerKey, messageId);
+        if (
+          this.isNewForTriage(peerKey, messageId, origin, floors) &&
+          this.deps.store.markTriageEligible(peerKey, messageId)
+        ) {
           this.deps.onNewLiveMessage?.(peerKey, messageId);
         }
         return { peerKey, messageId };
@@ -504,7 +507,8 @@ export class TelegramSyncManager {
   /**
    * A live arrival is new by definition. A replayed message is new only above the watermark the
    * chat had reached before the pass began; a chat with no live watermark yet is treated as
-   * backfill, so a first catch-up never floods triage with history.
+   * backfill, so a first catch-up never floods triage with history. Already-triaged / already-
+   * pending rows are filtered by {@link TelegramArchiveStore.markTriageEligible}.
    */
   private isNewForTriage(
     peerKey: string,
@@ -537,9 +541,9 @@ export class TelegramSyncManager {
   }
 
   /**
-   * Serializes archive writes from live events, difference replay, and gap recovery. They all
-   * write the same rows, so overlapping batches could otherwise commit a replayed older version
-   * on top of a newer live edit.
+   * Serializes archive writes from live events, difference replay, gap recovery, and history
+   * page commits. They all write the same rows, so overlapping batches could otherwise commit
+   * a replayed older version on top of a newer live edit.
    */
   private serialize<T>(task: () => Promise<T>): Promise<T> {
     const next = this.applying.then(task);
@@ -685,13 +689,16 @@ export class TelegramSyncManager {
         job.oldestMessageId ?? null,
         this.deps.pageSize ?? PAGE_SIZE,
       );
-      this.deps.store.recordHistoryPage(job.peerKey, page.messages, page.nextBeforeMessageId);
-      this.deps.store.clearImportRetry(job.peerKey);
-      this.setImportAttempts(job.peerKey, 0);
-      // Telegram's total counts service messages the adapter drops, so an exhausted cursor —
-      // never a message count — is what ends the walk. The transition is guarded because an
-      // operator may have paused or cancelled while this page was still in flight.
-      if (page.nextBeforeMessageId === null) this.deps.store.finishScan(job.peerKey);
+      // Fetch stays outside the chain; only the commit shares mutual exclusion with live/difference.
+      await this.serialize(async () => {
+        this.deps.store.recordHistoryPage(job.peerKey, page.messages, page.nextBeforeMessageId);
+        this.deps.store.clearImportRetry(job.peerKey);
+        this.setImportAttempts(job.peerKey, 0);
+        // Telegram's total counts service messages the adapter drops, so an exhausted cursor —
+        // never a message count — is what ends the walk. The transition is guarded because an
+        // operator may have paused or cancelled while this page was still in flight.
+        if (page.nextBeforeMessageId === null) this.deps.store.finishScan(job.peerKey);
+      });
     } catch (error) {
       await this.recordImportFailure(job.peerKey, error, at);
     }

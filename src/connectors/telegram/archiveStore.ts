@@ -275,42 +275,89 @@ export class TelegramArchiveStore {
     }
   }
 
+  /**
+   * Whether this observation may replace the current row.
+   *
+   * Rule: keep the existing current fields when they are fresher than the incoming snapshot.
+   * - Backfill never overwrites an existing row (a history page can predate a live edit or
+   *   reaction update); versions still accumulate via INSERT OR IGNORE.
+   * - Otherwise, if existing.edited_at is strictly newer than incoming.editedAt (missing
+   *   editedAt is older than any concrete timestamp), keep the existing row.
+   */
+  private shouldUpdateCurrent(
+    existing: { edited_at: string | null } | undefined,
+    message: TelegramMessage,
+    origin: string,
+  ): boolean {
+    if (!existing) return true;
+    if (origin === 'backfill') return false;
+    const incomingEdited = message.editedAt ?? null;
+    const existingEdited = existing.edited_at;
+    if (existingEdited && (!incomingEdited || existingEdited > incomingEdited)) return false;
+    return true;
+  }
+
   private applyMessage(message: TelegramMessage, origin: string): void {
     const versionHash = hashVersion(message);
     const ts = now();
-    this.db
-      .prepare(
-        `
-      INSERT INTO tg_messages(
-        peer_key,message_id,sender_key,sender_name,sent_at,edited_at,
-        reply_to_message_id,grouped_id,text,entities_json,reactions_json,
-        content_hash,observed_at,triage_pending
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(peer_key,message_id) DO UPDATE SET
-        sender_key=excluded.sender_key,sender_name=excluded.sender_name,
-        edited_at=excluded.edited_at,reply_to_message_id=excluded.reply_to_message_id,
-        grouped_id=excluded.grouped_id,text=excluded.text,
-        entities_json=excluded.entities_json,reactions_json=excluded.reactions_json,
-        content_hash=excluded.content_hash,observed_at=excluded.observed_at,
-        triage_pending=MAX(tg_messages.triage_pending,excluded.triage_pending)
-    `,
-      )
-      .run(
-        message.peerKey,
-        message.messageId,
-        message.senderKey ?? null,
-        message.senderName ?? null,
-        message.sentAt,
-        message.editedAt ?? null,
-        message.replyToMessageId ?? null,
-        message.groupedId ?? null,
-        message.text,
-        message.entitiesJson,
-        message.reactionsJson,
-        versionHash,
-        ts,
-        origin === 'live' ? 1 : 0,
-      );
+    const existing = this.db
+      .prepare(`SELECT edited_at FROM tg_messages WHERE peer_key=? AND message_id=?`)
+      .get(message.peerKey, message.messageId) as unknown as { edited_at: string | null } | undefined;
+    const updateCurrent = this.shouldUpdateCurrent(existing, message, origin);
+
+    if (!existing) {
+      // triage_pending is owned by markTriageEligible — apply never sets it.
+      this.db
+        .prepare(
+          `
+        INSERT INTO tg_messages(
+          peer_key,message_id,sender_key,sender_name,sent_at,edited_at,
+          reply_to_message_id,grouped_id,text,entities_json,reactions_json,
+          content_hash,observed_at,triage_pending
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+      `,
+        )
+        .run(
+          message.peerKey,
+          message.messageId,
+          message.senderKey ?? null,
+          message.senderName ?? null,
+          message.sentAt,
+          message.editedAt ?? null,
+          message.replyToMessageId ?? null,
+          message.groupedId ?? null,
+          message.text,
+          message.entitiesJson,
+          message.reactionsJson,
+          versionHash,
+          ts,
+        );
+    } else if (updateCurrent) {
+      this.db
+        .prepare(
+          `
+        UPDATE tg_messages SET
+          sender_key=?,sender_name=?,edited_at=?,reply_to_message_id=?,
+          grouped_id=?,text=?,entities_json=?,reactions_json=?,
+          content_hash=?,observed_at=?
+        WHERE peer_key=? AND message_id=?
+      `,
+        )
+        .run(
+          message.senderKey ?? null,
+          message.senderName ?? null,
+          message.editedAt ?? null,
+          message.replyToMessageId ?? null,
+          message.groupedId ?? null,
+          message.text,
+          message.entitiesJson,
+          message.reactionsJson,
+          versionHash,
+          ts,
+          message.peerKey,
+          message.messageId,
+        );
+    }
     this.db
       .prepare(
         `
@@ -331,7 +378,7 @@ export class TelegramArchiveStore {
         message.reactionsJson,
         message.poll ? JSON.stringify(message.poll) : null,
       );
-    this.writeMessageFts(message.peerKey, message.messageId, message.text);
+    if (updateCurrent) this.writeMessageFts(message.peerKey, message.messageId, message.text);
     this.upsertChildren(message);
     if (origin === 'live') {
       this.db
@@ -1370,10 +1417,19 @@ export class TelegramArchiveStore {
     };
   }
 
-  markTriageEligible(peerKey: string, messageId: number): void {
-    this.db
-      .prepare(`UPDATE tg_messages SET triage_pending=1 WHERE peer_key=? AND message_id=?`)
+  /**
+   * Marks a message pending triage. No-op (returns false) when the row is already pending or
+   * already triaged — callers use the return value so `onNewLiveMessage` fires only on a real
+   * transition into pending.
+   */
+  markTriageEligible(peerKey: string, messageId: number): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE tg_messages SET triage_pending=1
+         WHERE peer_key=? AND message_id=? AND triage_pending=0 AND triaged_at IS NULL`,
+      )
       .run(peerKey, messageId);
+    return result.changes > 0;
   }
 
   markTriagedThrough(peerKey: string, throughId: number, at: string): void {
