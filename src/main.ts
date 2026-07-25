@@ -10,7 +10,16 @@ const { scaffoldMemory } = await import('./agent/memory.js');
 
 scaffoldPersona();
 scaffoldMemory(cfg.memoryDir);
-for (const d of [cfg.inboxDir, cfg.outboxDir, cfg.artifactsDir, cfg.stateDir, cfg.logsDir, cfg.proposalsDir, cfg.evalCasesDir]) {
+for (const d of [
+  cfg.inboxDir,
+  cfg.outboxDir,
+  cfg.artifactsDir,
+  cfg.stateDir,
+  cfg.logsDir,
+  cfg.proposalsDir,
+  cfg.evalCasesDir,
+  cfg.telegramArchiveDir,
+]) {
   mkdirSync(d, { recursive: true });
 }
 
@@ -20,13 +29,37 @@ if (process.argv.includes('--selftest')) {
   const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all() as { name: string }[])
     .map((t) => t.name)
     .filter((n) => !n.startsWith('sqlite_'));
+  const tgMessages = (
+    db.prepare(`SELECT COUNT(1) AS n FROM tg_messages`).get() as unknown as { n: number } | undefined
+  )?.n ?? 0;
+  const tgMedia = (
+    db.prepare(`SELECT COUNT(1) AS n FROM tg_media`).get() as unknown as { n: number } | undefined
+  )?.n ?? 0;
+  const tgPending = (
+    db
+      .prepare(`SELECT COUNT(1) AS n FROM tg_work_items WHERE state IN ('pending','in_progress','paused')`)
+      .get() as unknown as { n: number } | undefined
+  )?.n ?? 0;
+  const tgPositions = (
+    db
+      .prepare(
+        `SELECT state_key, verified_at FROM tg_update_state
+         WHERE state_key='global' OR state_key LIKE 'channel:%'
+         ORDER BY state_key`,
+      )
+      .all() as unknown as { state_key: string; verified_at: string | null }[]
+  )
+    .map((row) => `${row.state_key}@${row.verified_at ?? 'never'}`)
+    .join(', ');
   console.log('icarus selftest');
   console.log(`  db: ${cfg.dbPath}`);
   console.log(`  tables: ${tables.join(', ')}`);
   console.log(`  desktop cwd: ${cfg.desktopDir}`);
   console.log(`  tz: ${cfg.tz}  model: ${cfg.defaultModel}`);
   console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}  browser mcp: ${cfg.browserMcp ? 'configured' : 'unset'}`);
-  console.log(`  tg userbot: ${cfg.tgSession ? 'configured' : 'unset'}  calendar mcp: ${cfg.calendarMcp ? 'configured' : 'unset'}`);
+  console.log(`  tg config: ${cfg.tgConfigState}  calendar mcp: ${cfg.calendarMcp ? 'configured' : 'unset'}`);
+  console.log(`  tg archive: ${tgMessages} messages · ${tgMedia} media · ${tgPending} pending work`);
+  console.log(`  tg update positions: ${tgPositions || 'none'}`);
   console.log(`  persona: ${composePersona().length} chars`);
   console.log('ok');
   process.exit(0);
@@ -89,11 +122,14 @@ trackTokenAge();
 registerCodeJobs();
 const { registerMailWatcher } = await import('./connectors/mail.js');
 registerMailWatcher();
-const { startUserbot } = await import('./connectors/telegramUser.js');
-startUserbot().catch((e) => {
-  log.error({ err: String(e) }, 'userbot failed to start');
-  void sendOwner(`telegram userbot failed to start: ${String(e).slice(0, 200)}`);
-});
+// Personal Telegram is independent of the owner bot: bad credentials must not crash-loop Icarus.
+try {
+  const { startTelegramRuntime } = await import('./connectors/telegram/runtime.js');
+  await startTelegramRuntime();
+} catch (e) {
+  log.error({ err: String(e) }, 'telegram archive runtime failed to start');
+  void sendOwner(`telegram archive failed to start: ${String(e).slice(0, 200)}`);
+}
 await ensurePersonaCommitted();
 
 // ---- watchdog + process safety -------------------------------------------
@@ -126,8 +162,8 @@ process.on('unhandledRejection', (e) => {
 });
 process.on('SIGINT', () => {
   void (async () => {
-    const { flushAllBuffers } = await import('./connectors/telegramUser.js');
-    flushAllBuffers();
+    const { stopTelegramRuntime } = await import('./connectors/telegram/runtime.js');
+    await stopTelegramRuntime();
     writeFileSync(cfg.shutdownMarker, now());
     process.exit(0);
   })();

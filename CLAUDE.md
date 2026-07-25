@@ -11,7 +11,8 @@ appended to the system prompt per turn — do not confuse the two.
   concurrency without revisiting outbox and DM interleaving.
 - `persona\` is edited at runtime by the approval flow (`src\improve\proposals.ts`), each
   change a git commit. Hand-edits are fine too — commit them so `/revert` has clean history.
-- Never commit `.env` or anything under `state\`, `inbox\`, `outbox\`, `artifacts\`.
+- Never commit `.env` or anything under `state\`, `inbox\`, `outbox\`, `artifacts\`,
+  `archive\`.
 - Restarting after a src change: `/restart` in the DM (the wrapper loop re-execs tsx).
 - The guard hook (`src\agent\guard.ts`) is the counterweight to bypassPermissions — keep it
   small, static, and reviewed; don't accrete ad-hoc rules mid-incident.

@@ -1,8 +1,21 @@
+import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { cfg, MODEL_ALIASES, OWNER_JID, resolveModel, ROOT } from '../config.js';
+import {
+  telegramHealth,
+  telegramRuntime,
+  stopTelegramRuntime,
+} from '../connectors/telegram/runtime.js';
+import {
+  renderTelegramChat,
+  renderTelegramDialogs,
+  renderTelegramHome,
+  renderTelegramImportPrompt,
+  renderTelegramStatusLine,
+} from '../connectors/telegram/ui.js';
 import { db, getSetting, now, setSetting } from '../db.js';
 import { log } from '../log.js';
 import { clearPending, hasPending, queueStatus, submitTurn, abortRunning } from '../queue.js';
@@ -10,7 +23,6 @@ import { clearSession, getSession } from '../agent/sessions.js';
 import { decideProposal, latestPending, listPersonaCommits, revertCommit } from '../improve/proposals.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
 import { saveIncomingFile } from './files.js';
-import { userbotConnected, getWhitelist, listDialogs, toggleWhitelist, flushAllBuffers } from '../connectors/telegramUser.js';
 import { sendOwner, sendOwnerDocument, sendOwnerKeyboard, sendOwnerEphemeral, deleteOwnerMessage, startTyping } from './send.js';
 import {
   fileActionKeyboard,
@@ -29,8 +41,11 @@ const bootedAt = Date.now();
 
 let typingStop: (() => void) | null = null;
 let stopUi: { timer: NodeJS.Timeout; msgId: number | null } | null = null;
-/** Dialog list snapshot. Valid until next /tg or restart; stale indexes answer via expired(). */
-let tgDialogSnapshot: { id: string; title: string }[] = [];
+/** Peers awaiting a second `tg:import` tap on the confirmation screen. */
+const pendingImportConfirms = new Set<string>();
+/** Typed `/tgremove <token>` confirmations. Expire after 10 minutes. */
+const removeTokens = new Map<string, { peerKey: string; expiresAt: number }>();
+const REMOVE_TOKEN_TTL_MS = 10 * 60_000;
 
 function armStopButton(): void {
   if (stopUi) return;
@@ -111,9 +126,7 @@ async function statusText(): Promise<string> {
     ...(cfg.mailDropDir
       ? [`▸ mail · export ${getSetting('mail_last_export_at')?.slice(0, 16) ?? 'never'} · parse ${getSetting('mail_last_parse') ?? 'never'}`]
       : []),
-    ...(cfg.tgSession
-      ? [`▸ tg · ${userbotConnected() ? 'connected' : 'offline'} · flush ${getSetting('tg_last_flush') ?? 'never'}`]
-      : []),
+    `▸ tg · ${renderTelegramStatusLine(telegramHealth())}`,
     `▸ token age · ${tokenAge} · db ${dbSize}`,
   ].join('\n');
 }
@@ -126,21 +139,6 @@ function modelMenu(): Rendered {
   const kb = new InlineKeyboard();
   for (const alias of Object.keys(MODEL_ALIASES)) kb.text(alias === current ? `• ${alias}` : alias, `model:${alias}`);
   return { text: `model: ${current} (${resolveModel(current)}) — pick:`, keyboard: kb };
-}
-
-async function renderTgMenu(): Promise<Rendered> {
-  const wl = getWhitelist();
-  tgDialogSnapshot = await listDialogs();
-  const kb = new InlineKeyboard();
-  for (let i = 0; i < tgDialogSnapshot.length; i++) {
-    const d = tgDialogSnapshot[i];
-    const on = wl.some((e) => e.id === d.id);
-    kb.text(`${on ? '✅' : '▫️'} ${d.title.slice(0, 28)}`, `tgw:${i}`).row();
-  }
-  return {
-    text: `personal-chat whitelist (${wl.length} active) — tap to toggle. Only whitelisted chats are ever read.`,
-    keyboard: kb,
-  };
 }
 
 /** Edit the tapped message in place; fall back to a fresh message (e.g. after a doc send). */
@@ -287,18 +285,113 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
     }
     return;
   }
-  // -- telegram whitelist ---------------------------------------------------
-  if (data.startsWith('tgw:')) {
-    const d = tgDialogSnapshot[Number(data.slice(4))];
-    if (!d) return void (await expired(ctx));
-    const nowOn = toggleWhitelist(d.id, d.title);
-    await ctx.answerCallbackQuery({ text: `${d.title.slice(0, 40)} ${nowOn ? 'added' : 'removed'}` });
-    try {
-      await editTo(ctx, await renderTgMenu());
-    } catch {
-      await editTo(ctx, { text: `${d.title.slice(0, 40)} ${nowOn ? 'added' : 'removed'} — run /tg again to see the updated list.`, keyboard: new InlineKeyboard() });
+  // -- telegram archive -----------------------------------------------------
+  if (data === 'tg:home' || data.startsWith('tg:')) {
+    const runtime = telegramRuntime();
+    if (!runtime) {
+      await ctx.answerCallbackQuery({ text: 'personal Telegram is not configured' });
+      return;
     }
-    return;
+    try {
+      if (data === 'tg:home') {
+        await ctx.answerCallbackQuery();
+        await editTo(ctx, renderTelegramHome(runtime.health()));
+        return;
+      }
+      if (data.startsWith('tg:page:')) {
+        const [, , pageStr, qRefStr] = data.split(':');
+        const query = refGet(Number(qRefStr));
+        if (query === undefined) return void (await expired(ctx));
+        await ctx.answerCallbackQuery();
+        const page = await runtime.searchDialogs(query, Number(pageStr) || 0, 8);
+        await editTo(ctx, renderTelegramDialogs(page));
+        return;
+      }
+      if (data.startsWith('tg:chat:')) {
+        const peerKey = refGet(Number(data.slice('tg:chat:'.length)));
+        if (!peerKey) return void (await expired(ctx));
+        await ctx.answerCallbackQuery();
+        pendingImportConfirms.delete(peerKey);
+        const status = runtime.getChat(peerKey);
+        if (!status) return void (await expired(ctx));
+        await editTo(ctx, renderTelegramChat(status));
+        return;
+      }
+      if (data.startsWith('tg:import:')) {
+        const peerKey = refGet(Number(data.slice('tg:import:'.length)));
+        if (!peerKey) return void (await expired(ctx));
+        await ctx.answerCallbackQuery();
+        if (!pendingImportConfirms.has(peerKey)) {
+          const prepared = await runtime.prepareImport(peerKey);
+          pendingImportConfirms.add(peerKey);
+          await editTo(ctx, renderTelegramImportPrompt(prepared));
+          return;
+        }
+        pendingImportConfirms.delete(peerKey);
+        await runtime.startImport(peerKey);
+        const status = runtime.getChat(peerKey);
+        if (!status) return void (await expired(ctx));
+        await editTo(ctx, renderTelegramChat(status));
+        return;
+      }
+      if (data.startsWith('tg:pause:')) {
+        const peerKey = refGet(Number(data.slice('tg:pause:'.length)));
+        if (!peerKey) return void (await expired(ctx));
+        await ctx.answerCallbackQuery({ text: 'paused' });
+        runtime.pause(peerKey);
+        const status = runtime.getChat(peerKey);
+        if (status) await editTo(ctx, renderTelegramChat(status));
+        return;
+      }
+      if (data.startsWith('tg:resume:')) {
+        const peerKey = refGet(Number(data.slice('tg:resume:'.length)));
+        if (!peerKey) return void (await expired(ctx));
+        await ctx.answerCallbackQuery({ text: 'resumed' });
+        runtime.resume(peerKey);
+        const status = runtime.getChat(peerKey);
+        if (status) await editTo(ctx, renderTelegramChat(status));
+        return;
+      }
+      if (data.startsWith('tg:cancel:')) {
+        const peerKey = refGet(Number(data.slice('tg:cancel:'.length)));
+        if (!peerKey) return void (await expired(ctx));
+        await ctx.answerCallbackQuery({ text: 'cancelled' });
+        runtime.cancel(peerKey);
+        const status = runtime.getChat(peerKey);
+        if (status) await editTo(ctx, renderTelegramChat(status));
+        return;
+      }
+      if (data.startsWith('tg:retry:')) {
+        const peerKey = refGet(Number(data.slice('tg:retry:'.length)));
+        if (!peerKey) return void (await expired(ctx));
+        await ctx.answerCallbackQuery({ text: 'retrying' });
+        runtime.retry(peerKey);
+        const status = runtime.getChat(peerKey);
+        if (status) await editTo(ctx, renderTelegramChat(status));
+        return;
+      }
+      if (data.startsWith('tg:remove:')) {
+        const peerKey = refGet(Number(data.slice('tg:remove:'.length)));
+        if (!peerKey) return void (await expired(ctx));
+        const status = runtime.getChat(peerKey);
+        if (!status) return void (await expired(ctx));
+        await ctx.answerCallbackQuery();
+        const token = randomBytes(3).toString('hex');
+        removeTokens.set(token, { peerKey, expiresAt: Date.now() + REMOVE_TOKEN_TTL_MS });
+        await ctx.reply(
+          `To delete the local archive for "${status.chat.title}", type:\n/tgremove ${token}`,
+        );
+        return;
+      }
+    } catch (e) {
+      const text = String(e instanceof Error ? e.message : e).slice(0, 190);
+      try {
+        await ctx.answerCallbackQuery({ text });
+      } catch {
+        await ctx.reply(text);
+      }
+      return;
+    }
   }
   await ctx.answerCallbackQuery();
 }
@@ -338,12 +431,48 @@ export function createBot(): Bot {
   });
 
   bot.command('tg', async (ctx) => {
-    if (!userbotConnected()) return void (await ctx.reply('userbot not connected — set TG_API_ID/TG_API_HASH/TG_SESSION (npm run tg-login), then /restart.'));
+    const runtime = telegramRuntime();
+    const query = ctx.match?.trim() ?? '';
+    if (!runtime) {
+      return void (await ctx.reply(
+        'personal Telegram is not configured — run npm run tg-setup locally, then /restart.',
+      ));
+    }
     try {
-      const r = await renderTgMenu();
-      await ctx.reply(r.text, { reply_markup: r.keyboard });
+      if (!query) {
+        const home = renderTelegramHome(runtime.health());
+        await ctx.reply(home.text, { reply_markup: home.keyboard });
+        return;
+      }
+      const page = await runtime.searchDialogs(query, 0, 8);
+      const rendered = renderTelegramDialogs(page);
+      await ctx.reply(rendered.text, { reply_markup: rendered.keyboard });
     } catch (e) {
       await ctx.reply(`couldn't list dialogs: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`);
+    }
+  });
+
+  bot.command('tgremove', async (ctx) => {
+    const token = ctx.match?.trim() ?? '';
+    if (!token) return void (await ctx.reply('usage: /tgremove <token>'));
+    const entry = removeTokens.get(token);
+    removeTokens.delete(token);
+    if (!entry || entry.expiresAt < Date.now()) {
+      return void (await ctx.reply('that remove token is missing or expired — tap remove archive again.'));
+    }
+    const runtime = telegramRuntime();
+    if (!runtime) {
+      return void (await ctx.reply(
+        'personal Telegram is not configured — run npm run tg-setup locally, then /restart.',
+      ));
+    }
+    try {
+      const title = runtime.getChat(entry.peerKey)?.chat.title ?? entry.peerKey;
+      await runtime.removeArchive(entry.peerKey);
+      pendingImportConfirms.delete(entry.peerKey);
+      await ctx.reply(`removed local archive for "${title}".`);
+    } catch (e) {
+      await ctx.reply(`couldn't remove archive: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`);
     }
   });
 
@@ -380,7 +509,7 @@ export function createBot(): Bot {
 
   bot.command('restart', async (ctx) => {
     await ctx.reply('restarting…');
-    flushAllBuffers();
+    await stopTelegramRuntime();
     writeFileSync(cfg.shutdownMarker, now());
     setTimeout(() => process.exit(0), 500);
   });
@@ -447,7 +576,7 @@ const MENU_COMMANDS = [
   { command: 'reject', description: 'reject the pending persona proposal' },
   { command: 'feedback', description: 'log feedback for the nightly reflection' },
   { command: 'revert', description: 'roll back a persona change' },
-  { command: 'tg', description: 'manage personal-chat whitelist' },
+  { command: 'tg', description: 'manage personal Telegram archive' },
   { command: 'restart', description: 'restart Icarus' },
 ];
 
