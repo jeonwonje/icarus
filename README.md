@@ -70,6 +70,8 @@ The bot answers **only** the user id in `.env`. Everyone else gets silence.
 4. Run `/tg`, search for a group or DM, review its message count, and confirm import.
 5. Use `/status` for connector health and `/tg` for detailed import progress.
 6. Search imported messages with `/archive <query>`.
+7. After import or the weekly sweep, chat→wiki mapping proposals arrive as DMs with
+   Approve/Reject buttons.
 
 The personal-account connection is read-only. Icarus never sends, reacts, votes, joins,
 or marks messages read as you.

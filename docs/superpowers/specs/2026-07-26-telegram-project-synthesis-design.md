@@ -1,7 +1,7 @@
 # Telegram project synthesis — design (phase 3)
 
 Date: 2026-07-26
-Status: approved for implementation planning
+Status: approved for implementation
 Depends on:
 - `docs/superpowers/specs/2026-07-25-telegram-archive-foundation-design.md` (phase 1)
 - `docs/superpowers/specs/2026-07-26-telegram-archive-retrieval-design.md` (phase 2)
