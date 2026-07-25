@@ -25,7 +25,7 @@ export function refGet(id: number): string | undefined {
   return refs.get(id);
 }
 
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+export const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 export interface Rendered {
   text: string;
