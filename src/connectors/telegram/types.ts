@@ -103,7 +103,14 @@ export interface DifferenceResult {
   events: TelegramLiveEvent[];
   globalState?: string;
   channelState?: string;
+  /** False only while more difference pages remain for the same catch-up. */
   complete: boolean;
+  /**
+   * True when Telegram discarded the range instead of replaying it. The returned position
+   * still advances past the lost range, so the caller must reconcile history rather than
+   * request the same position again.
+   */
+  gap: boolean;
 }
 
 export interface TelegramAdapter {
@@ -111,6 +118,11 @@ export interface TelegramAdapter {
   disconnect(): Promise<void>;
   isAuthorized(): Promise<boolean>;
   listDialogs(): Promise<TelegramDialog[]>;
+  /**
+   * Rebuilds peer handles from dialogs already stored on disk. Reads for a persisted chat
+   * then work straight after a restart, without a full dialog listing first.
+   */
+  primePeers(dialogs: readonly TelegramDialog[]): void;
   countMessages(peerKey: string): Promise<number>;
   fetchHistoryPage(peerKey: string, beforeMessageId: number | null, limit: number): Promise<HistoryPage>;
   fetchMessage(peerKey: string, messageId: number): Promise<TelegramMessage | undefined>;

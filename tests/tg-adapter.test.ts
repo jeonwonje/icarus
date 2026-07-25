@@ -1,7 +1,7 @@
 import './env.js';
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, type WriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -11,17 +11,27 @@ import {
   GramJsTelegramAdapter,
   PollTracker,
   classifyDialog,
+  inputPeerFromDialog,
   normalizeChannelDifference,
   normalizeGlobalDifference,
   normalizeMessage,
   normalizeUpdates,
+  type TelegramReadClient,
 } from '../src/connectors/telegram/adapter.js';
 import { FakeTelegramAdapter } from '../src/connectors/telegram/fakeAdapter.js';
-import type { TelegramMessage } from '../src/connectors/telegram/types.js';
+import type { TelegramDialog, TelegramMessage } from '../src/connectors/telegram/types.js';
 
 const OBSERVED_AT = '2026-01-01T00:00:00.000Z';
 
 const dmPeer = new Api.PeerUser({ userId: bigInt(1) });
+
+const ALICE: TelegramDialog = {
+  peerKey: 'dm:1',
+  kind: 'dm',
+  title: 'Alice',
+  accessHash: '11',
+  selected: true,
+};
 
 function dmMessage(id: number, args: Partial<ConstructorParameters<typeof Api.Message>[0]> = {}) {
   return new Api.Message({
@@ -31,6 +41,89 @@ function dmMessage(id: number, args: Partial<ConstructorParameters<typeof Api.Me
     message: '',
     ...args,
   });
+}
+
+function documentMedia(): Api.MessageMediaDocument {
+  return new Api.MessageMediaDocument({
+    document: new Api.Document({
+      id: bigInt(4242),
+      accessHash: bigInt(1),
+      fileReference: Buffer.from([1]),
+      date: 1700000000,
+      mimeType: 'application/pdf',
+      size: bigInt(2048),
+      dcId: 2,
+      attributes: [new Api.DocumentAttributeFilename({ fileName: 'report.pdf' })],
+    }),
+  });
+}
+
+function tempPath(name: string): string {
+  return path.join(mkdtempSync(path.join(tmpdir(), 'icarus-tg-adapter-')), name);
+}
+
+interface StubBehavior {
+  invoke?: (request: Api.AnyRequest) => Promise<unknown>;
+  getMessages?: (params: Record<string, unknown>) => Promise<Api.Message[]>;
+  downloadMedia?: (message: Api.Message, outputFile: WriteStream) => Promise<void>;
+}
+
+/** Stands in for the gramJS client so adapter call shapes can be asserted offline. */
+class StubClient {
+  readonly invoked: Api.AnyRequest[] = [];
+  readonly getMessagesCalls: Record<string, unknown>[] = [];
+  readonly downloaded: Api.Message[] = [];
+  iterDialogsCalls = 0;
+  getInputEntityCalls = 0;
+
+  constructor(private readonly behavior: StubBehavior = {}) {}
+
+  async invoke(request: Api.AnyRequest): Promise<unknown> {
+    this.invoked.push(request);
+    if (!this.behavior.invoke) throw new Error(`unexpected request: ${request.className}`);
+    return this.behavior.invoke(request);
+  }
+
+  async getMessages(_peer: unknown, params: Record<string, unknown> = {}): Promise<Api.Message[]> {
+    this.getMessagesCalls.push(params);
+    return (await this.behavior.getMessages?.(params)) ?? [];
+  }
+
+  async downloadMedia(message: Api.Message, params: { outputFile?: unknown }): Promise<void> {
+    this.downloaded.push(message);
+    await this.behavior.downloadMedia?.(message, params.outputFile as WriteStream);
+  }
+
+  iterDialogs(): never {
+    this.iterDialogsCalls += 1;
+    throw new Error('iterDialogs must not run');
+  }
+
+  async getInputEntity(): Promise<never> {
+    this.getInputEntityCalls += 1;
+    throw new Error('getInputEntity must not run');
+  }
+
+  addEventHandler(): void {}
+  async connect(): Promise<void> {}
+  async disconnect(): Promise<void> {}
+  async checkAuthorization(): Promise<boolean> {
+    return true;
+  }
+}
+
+function stubAdapter(behavior: StubBehavior = {}): {
+  adapter: GramJsTelegramAdapter;
+  client: StubClient;
+} {
+  const client = new StubClient(behavior);
+  const adapter = new GramJsTelegramAdapter({
+    apiId: 1,
+    apiHash: 'hash',
+    session: '',
+    client: client as unknown as TelegramReadClient,
+  });
+  return { adapter, client };
 }
 
 test('dialog classifier accepts only DMs and groups', () => {
@@ -286,6 +379,7 @@ test('global difference results serialize durable update positions', () => {
     OBSERVED_AT,
   );
   assert.equal(full.complete, true);
+  assert.equal(full.gap, false);
   assert.equal(full.globalState, '{"pts":10,"qts":0,"date":5,"seq":1}');
   assert.equal(full.events.length, 1);
   assert.equal(full.events[0].type === 'message' && full.events[0].message.text, 'missed');
@@ -302,7 +396,9 @@ test('global difference results serialize durable update positions', () => {
     previous,
     OBSERVED_AT,
   );
+  // A slice is progress, not data loss: keep fetching from the intermediate state.
   assert.equal(slice.complete, false);
+  assert.equal(slice.gap, false);
   assert.equal(slice.globalState, '{"pts":10,"qts":0,"date":5,"seq":1}');
 
   const empty = normalizeGlobalDifference(
@@ -314,8 +410,11 @@ test('global difference results serialize durable update positions', () => {
     events: [],
     globalState: '{"pts":1,"qts":2,"date":9,"seq":8}',
     complete: true,
+    gap: false,
   });
 
+  // Too long is an unrecoverable gap: it advances past the lost range so the caller cannot
+  // request the same pts forever, and flags that history must be reconciled instead.
   const tooLong = normalizeGlobalDifference(
     new Api.updates.DifferenceTooLong({ pts: 99 }),
     previous,
@@ -324,7 +423,8 @@ test('global difference results serialize durable update positions', () => {
   assert.deepEqual(tooLong, {
     events: [],
     globalState: '{"pts":99,"qts":2,"date":3,"seq":4}',
-    complete: false,
+    complete: true,
+    gap: true,
   });
 });
 
@@ -347,13 +447,19 @@ test('channel difference results serialize durable update positions', () => {
   );
   assert.equal(partial.channelState, '{"pts":42}');
   assert.equal(partial.complete, false);
+  assert.equal(partial.gap, false);
   assert.equal(partial.events.length, 1);
 
   const done = normalizeChannelDifference(
     new Api.updates.ChannelDifferenceEmpty({ final: true, pts: 43 }),
     OBSERVED_AT,
   );
-  assert.deepEqual(done, { events: [], channelState: '{"pts":43}', complete: true });
+  assert.deepEqual(done, {
+    events: [],
+    channelState: '{"pts":43}',
+    complete: true,
+    gap: false,
+  });
 
   const tooLong = normalizeChannelDifference(
     new Api.updates.ChannelDifferenceTooLong({
@@ -375,7 +481,8 @@ test('channel difference results serialize durable update positions', () => {
     OBSERVED_AT,
   );
   assert.equal(tooLong.channelState, '{"pts":77}');
-  assert.equal(tooLong.complete, false);
+  assert.equal(tooLong.complete, true);
+  assert.equal(tooLong.gap, true);
   assert.equal(tooLong.events.length, 1);
 });
 
@@ -428,7 +535,7 @@ test('fake adapter paginates, clones, and downloads media without network', asyn
       'dm:1': [base, { ...base, messageId: 2, text: 'two' }, { ...base, messageId: 3, text: 'three' }],
     },
     mediaFiles: { 'dm:1:1:photo:1': Buffer.from('payload') },
-    globalDifferences: [{ events: [], globalState: '{"pts":2}', complete: true }],
+    globalDifferences: [{ events: [], globalState: '{"pts":2}', complete: true, gap: false }],
   });
 
   assert.equal(await fake.countMessages('dm:1'), 3);
@@ -457,11 +564,17 @@ test('fake adapter paginates, clones, and downloads media without network', asyn
     events: [],
     globalState: '{"pts":2}',
     complete: true,
+    gap: false,
   });
-  assert.deepEqual(await fake.getGlobalDifference('{"pts":2}'), { events: [], complete: true });
+  assert.deepEqual(await fake.getGlobalDifference('{"pts":2}'), {
+    events: [],
+    complete: true,
+    gap: false,
+  });
   assert.deepEqual(await fake.getChannelDifference('supergroup:2', undefined), {
     events: [],
     complete: true,
+    gap: false,
   });
 });
 
@@ -500,4 +613,244 @@ test('fake adapter notifies connection and event consumers with cloned payloads'
   await fake.emit({ type: 'message', message });
   assert.deepEqual(states, [true, false]);
   assert.equal(seen.length, 1);
+});
+
+test('countMessages reads the reported total without paginating history', async () => {
+  const { adapter, client } = stubAdapter({
+    invoke: async () =>
+      new Api.messages.MessagesSlice({
+        count: 4321,
+        messages: [dmMessage(1)],
+        chats: [],
+        users: [],
+      }),
+  });
+  adapter.primePeers([ALICE]);
+
+  assert.equal(await adapter.countMessages('dm:1'), 4321);
+  // getMessages(limit: 0) walks every page in gramJS; the count must cost one request.
+  assert.equal(client.getMessagesCalls.length, 0);
+  assert.equal(client.invoked.length, 1);
+  const request = client.invoked[0];
+  assert.ok(request instanceof Api.messages.GetHistory);
+  assert.equal(request.limit, 1);
+  assert.equal(request.offsetId, 0);
+  assert.equal(request.addOffset, 0);
+  assert.equal(request.minId, 0);
+  assert.equal(request.maxId, 0);
+});
+
+test('countMessages falls back to the returned messages when Telegram reports no total', async () => {
+  const { adapter } = stubAdapter({
+    invoke: async () =>
+      new Api.messages.Messages({ messages: [dmMessage(1), dmMessage(2)], chats: [], users: [] }),
+  });
+  adapter.primePeers([ALICE]);
+  assert.equal(await adapter.countMessages('dm:1'), 2);
+});
+
+test('persisted dialogs rebuild input peers so a cold restart skips listDialogs', async () => {
+  const { adapter, client } = stubAdapter({
+    invoke: async () =>
+      new Api.messages.ChannelMessages({
+        pts: 1,
+        count: 7,
+        messages: [],
+        topics: [],
+        chats: [],
+        users: [],
+      }),
+  });
+  adapter.primePeers([
+    ALICE,
+    { peerKey: 'supergroup:2', kind: 'supergroup', title: 'Team', accessHash: '22', selected: true },
+    { peerKey: 'group:3', kind: 'group', title: 'Basic', selected: true },
+  ]);
+
+  await adapter.countMessages('dm:1');
+  await adapter.countMessages('supergroup:2');
+  await adapter.countMessages('group:3');
+
+  const peers = client.invoked.map((request) => (request as Api.messages.GetHistory).peer);
+  const [dm, supergroup, group] = peers;
+  assert.ok(dm instanceof Api.InputPeerUser);
+  assert.equal(dm.userId.toString(), '1');
+  assert.equal(dm.accessHash.toString(), '11');
+  assert.ok(supergroup instanceof Api.InputPeerChannel);
+  assert.equal(supergroup.channelId.toString(), '2');
+  assert.equal(supergroup.accessHash.toString(), '22');
+  assert.ok(group instanceof Api.InputPeerChat);
+  assert.equal(group.chatId.toString(), '3');
+  assert.equal(client.iterDialogsCalls, 0);
+  assert.equal(client.getInputEntityCalls, 0);
+});
+
+test('input peers need an access hash for users and channels but not basic groups', () => {
+  assert.equal(inputPeerFromDialog({ ...ALICE, accessHash: undefined }), undefined);
+  assert.equal(
+    inputPeerFromDialog({
+      peerKey: 'supergroup:2',
+      kind: 'supergroup',
+      title: 'Team',
+      selected: true,
+    }),
+    undefined,
+  );
+  const negative = inputPeerFromDialog({ ...ALICE, accessHash: '-9223372036854775808' });
+  assert.ok(negative instanceof Api.InputPeerUser);
+  assert.equal(negative.accessHash.toString(), '-9223372036854775808');
+  const group = inputPeerFromDialog({
+    peerKey: 'group:3',
+    kind: 'group',
+    title: 'Basic',
+    selected: true,
+  });
+  assert.ok(group instanceof Api.InputPeerChat);
+});
+
+test('downloadMedia waits for the output stream to close before reporting bytes', async () => {
+  const payload = Buffer.alloc(512 * 1024, 7);
+  const message = dmMessage(10, { media: documentMedia() });
+  const { adapter } = stubAdapter({
+    getMessages: async () => [message],
+    // gramJS closes the writer in a `finally` that can settle after downloadMedia resolves.
+    downloadMedia: async (_message, outputFile) => {
+      outputFile.write(payload);
+      setTimeout(() => outputFile.close(), 25);
+    },
+  });
+  adapter.primePeers([ALICE]);
+  const output = tempPath('report.pdf');
+
+  const bytes = await adapter.downloadMedia('dm:1', 10, 'dm:1:10:document:4242', output);
+
+  assert.equal(bytes, payload.length);
+  assert.equal(statSync(output).size, payload.length);
+});
+
+test('downloadMedia deletes the partial file when the transfer fails', async () => {
+  const message = dmMessage(10, { media: documentMedia() });
+  const { adapter } = stubAdapter({
+    getMessages: async () => [message],
+    downloadMedia: async (_message, outputFile) => {
+      outputFile.write(Buffer.alloc(4096, 1));
+      throw new Error('file reference expired');
+    },
+  });
+  adapter.primePeers([ALICE]);
+  const output = tempPath('report.pdf');
+
+  await assert.rejects(
+    () => adapter.downloadMedia('dm:1', 10, 'dm:1:10:document:4242', output),
+    /file reference expired/,
+  );
+  assert.equal(existsSync(output), false);
+});
+
+test('downloadMedia refuses descriptors that are not photos or documents', async () => {
+  const geo = new Api.MessageMediaGeo({
+    geo: new Api.GeoPoint({ long: 1, lat: 2, accessHash: bigInt(0) }),
+  });
+  const { adapter, client } = stubAdapter({
+    getMessages: async () => [dmMessage(12, { media: geo })],
+  });
+  adapter.primePeers([ALICE]);
+  const output = tempPath('geo.bin');
+
+  await assert.rejects(
+    () => adapter.downloadMedia('dm:1', 12, 'dm:1:12:geo', output),
+    /not a downloadable file/,
+  );
+  assert.equal(client.downloaded.length, 0);
+  assert.equal(existsSync(output), false);
+});
+
+test('channel difference gaps reseed the position instead of replaying the same pts', async () => {
+  const { adapter, client } = stubAdapter({
+    invoke: async (request) => {
+      if (request instanceof Api.updates.GetChannelDifference) {
+        return new Api.updates.ChannelDifferenceTooLong({
+          // Telegram may omit the dialog pts, which previously left the caller stuck.
+          dialog: new Api.Dialog({
+            peer: new Api.PeerChannel({ channelId: bigInt(2) }),
+            topMessage: 21,
+            readInboxMaxId: 0,
+            readOutboxMaxId: 0,
+            unreadCount: 0,
+            unreadMentionsCount: 0,
+            unreadReactionsCount: 0,
+            notifySettings: new Api.PeerNotifySettings({}),
+          }),
+          messages: [],
+          chats: [],
+          users: [],
+        });
+      }
+      if (request instanceof Api.channels.GetFullChannel) return { fullChat: { pts: 500 } };
+      throw new Error(`unexpected request: ${request.className}`);
+    },
+  });
+  adapter.primePeers([
+    { peerKey: 'supergroup:2', kind: 'supergroup', title: 'Team', accessHash: '22', selected: true },
+  ]);
+
+  const result = await adapter.getChannelDifference('supergroup:2', '{"pts":10}');
+
+  assert.equal(result.gap, true);
+  assert.equal(result.complete, true);
+  assert.equal(result.channelState, '{"pts":500}');
+  assert.equal(client.invoked.length, 2);
+});
+
+test('difference messages take sender names from the response users and chats', () => {
+  const state = new Api.updates.State({ pts: 10, qts: 0, date: 5, seq: 1, unreadCount: 0 });
+  const global = normalizeGlobalDifference(
+    new Api.updates.Difference({
+      newMessages: [
+        dmMessage(30, { fromId: new Api.PeerUser({ userId: bigInt(42) }), message: 'hi' }),
+      ],
+      newEncryptedMessages: [],
+      otherUpdates: [
+        new Api.UpdateEditMessage({
+          message: dmMessage(31, {
+            fromId: new Api.PeerUser({ userId: bigInt(42) }),
+            message: 'hi again',
+          }),
+          pts: 11,
+          ptsCount: 1,
+        }),
+      ],
+      chats: [],
+      users: [new Api.User({ id: bigInt(42), firstName: 'Alice', lastName: 'Adams' })],
+      state,
+    }),
+    { pts: 1, qts: 2, date: 3, seq: 4 },
+    OBSERVED_AT,
+  );
+  const names = global.events.map((event) =>
+    event.type === 'message' || event.type === 'edit' ? event.message.senderName : undefined,
+  );
+  assert.deepEqual(names, ['Alice Adams', 'Alice Adams']);
+
+  const channelMessage = new Api.Message({
+    id: 32,
+    peerId: new Api.PeerChannel({ channelId: bigInt(2) }),
+    fromId: new Api.PeerUser({ userId: bigInt(43) }),
+    date: 1700000000,
+    message: 'group hello',
+  });
+  const channel = normalizeChannelDifference(
+    new Api.updates.ChannelDifference({
+      pts: 42,
+      newMessages: [channelMessage],
+      otherUpdates: [],
+      chats: [],
+      users: [new Api.User({ id: bigInt(43), username: 'bob' })],
+    }),
+    OBSERVED_AT,
+  );
+  assert.equal(
+    channel.events[0].type === 'message' ? channel.events[0].message.senderName : undefined,
+    'bob',
+  );
 });

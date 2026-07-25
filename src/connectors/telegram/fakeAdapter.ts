@@ -25,6 +25,8 @@ export class FakeTelegramAdapter implements TelegramAdapter {
   connected = false;
   authorized = true;
   readonly downloads: string[] = [];
+  /** Peer keys seeded from persisted dialogs, in the order they were primed. */
+  readonly primedPeers: string[] = [];
   private readonly eventHandlers = new Set<(event: TelegramLiveEvent) => Promise<void>>();
   private readonly connectionHandlers = new Set<(connected: boolean) => void>();
 
@@ -46,6 +48,12 @@ export class FakeTelegramAdapter implements TelegramAdapter {
 
   async listDialogs(): Promise<TelegramDialog[]> {
     return structuredClone(this.data.dialogs);
+  }
+
+  primePeers(dialogs: readonly TelegramDialog[]): void {
+    for (const dialog of dialogs) {
+      if (!this.primedPeers.includes(dialog.peerKey)) this.primedPeers.push(dialog.peerKey);
+    }
   }
 
   async countMessages(peerKey: string): Promise<number> {
@@ -88,7 +96,7 @@ export class FakeTelegramAdapter implements TelegramAdapter {
   }
 
   async getGlobalDifference(_state: string | undefined): Promise<DifferenceResult> {
-    return this.data.globalDifferences?.shift() ?? { events: [], complete: true };
+    return this.data.globalDifferences?.shift() ?? { events: [], complete: true, gap: false };
   }
 
   async getChannelDifference(
@@ -99,6 +107,7 @@ export class FakeTelegramAdapter implements TelegramAdapter {
       this.data.channelDifferences?.[peerKey]?.shift() ?? {
         events: [],
         complete: true,
+        gap: false,
       }
     );
   }

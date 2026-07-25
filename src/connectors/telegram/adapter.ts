@@ -1,4 +1,5 @@
-import { statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, rmSync, statSync } from 'node:fs';
+import { finished } from 'node:stream/promises';
 import { Api, TelegramClient } from 'telegram';
 import { returnBigInt } from 'telegram/Helpers.js';
 import { DeletedMessage, type DeletedMessageEvent } from 'telegram/events/DeletedMessage.js';
@@ -24,10 +25,30 @@ import type {
 const CHANNEL_DIFFERENCE_LIMIT = 100;
 const PLAIN_URL = /https?:\/\/[^\s<>"'()\[\]]+/gi;
 
+/**
+ * The only gramJS methods this module is allowed to touch. Every write method is absent, so
+ * a send or delete call would not compile.
+ */
+export type TelegramReadClient = Pick<
+  TelegramClient,
+  | 'connect'
+  | 'disconnect'
+  | 'checkAuthorization'
+  | 'getMe'
+  | 'iterDialogs'
+  | 'getInputEntity'
+  | 'getMessages'
+  | 'downloadMedia'
+  | 'invoke'
+  | 'addEventHandler'
+>;
+
 export interface TelegramAdapterConfig {
   apiId: number;
   apiHash: string;
   session: string;
+  /** Test seam. Production callers omit it and the adapter builds its own client. */
+  client?: TelegramReadClient;
 }
 
 export interface GlobalUpdatePosition {
@@ -67,19 +88,50 @@ export function peerFromKey(peerKey: string): Api.TypePeer | undefined {
   return undefined;
 }
 
+/**
+ * Rebuilds the input peer for a chat already persisted by an earlier run. Users and channels
+ * are unusable without their access hash; basic groups are addressed by id alone.
+ */
+export function inputPeerFromDialog(dialog: TelegramDialog): Api.TypeInputPeer | undefined {
+  const peer = peerFromKey(dialog.peerKey);
+  if (peer instanceof Api.PeerChat) return new Api.InputPeerChat({ chatId: peer.chatId });
+  if (!dialog.accessHash || !/^-?\d+$/.test(dialog.accessHash)) return undefined;
+  const accessHash = returnBigInt(dialog.accessHash);
+  if (peer instanceof Api.PeerUser) return new Api.InputPeerUser({ userId: peer.userId, accessHash });
+  if (peer instanceof Api.PeerChannel) {
+    return new Api.InputPeerChannel({ channelId: peer.channelId, accessHash });
+  }
+  return undefined;
+}
+
 function textOf(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value instanceof Api.TextWithEntities) return value.text;
   return '';
 }
 
-function displayName(entity: Entity | undefined): string | undefined {
+function displayName(
+  entity: Entity | Api.TypeUser | Api.TypeChat | undefined,
+): string | undefined {
   if (entity instanceof Api.User) {
     const name = [entity.firstName, entity.lastName].filter(Boolean).join(' ').trim();
     return name || entity.username || undefined;
   }
-  if (entity instanceof Api.Chat || entity instanceof Api.Channel) return entity.title;
+  if (entity && 'title' in entity && typeof entity.title === 'string') return entity.title;
   return undefined;
+}
+
+/** Display names for the participants Telegram attached to a difference response. */
+export function entityNames(
+  users: Api.TypeUser[] = [],
+  chats: Api.TypeChat[] = [],
+): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const entity of [...users, ...chats]) {
+    const name = displayName(entity);
+    if (name) names.set(entity.id.toString(), name);
+  }
+  return names;
 }
 
 function optionKey(option: Buffer | Uint8Array): string {
@@ -369,12 +421,18 @@ function messageEvents(
   type: 'message' | 'edit',
   polls?: PollTracker,
   selfKey?: string,
+  names?: Map<string, string>,
 ): TelegramLiveEvent[] {
   const events: TelegramLiveEvent[] = [];
   for (const message of messages) {
     const peerKey = eligiblePeerKey(message, selfKey);
     if (!peerKey || !(message instanceof Api.Message)) continue;
-    const normalized = normalizeMessage(peerKey, message);
+    const senderKey = message.senderId?.toString();
+    const normalized = normalizeMessage(
+      peerKey,
+      message,
+      senderKey ? names?.get(senderKey) : undefined,
+    );
     polls?.observe(normalized);
     events.push({ type, message: normalized });
   }
@@ -386,16 +444,17 @@ export function normalizeUpdates(
   observedAt: string,
   polls?: PollTracker,
   selfKey?: string,
+  names?: Map<string, string>,
 ): TelegramLiveEvent[] {
   const events: TelegramLiveEvent[] = [];
   for (const update of updates) {
     if (update instanceof Api.UpdateNewMessage || update instanceof Api.UpdateNewChannelMessage) {
-      events.push(...messageEvents([update.message], 'message', polls, selfKey));
+      events.push(...messageEvents([update.message], 'message', polls, selfKey, names));
     } else if (
       update instanceof Api.UpdateEditMessage ||
       update instanceof Api.UpdateEditChannelMessage
     ) {
-      events.push(...messageEvents([update.message], 'edit', polls, selfKey));
+      events.push(...messageEvents([update.message], 'edit', polls, selfKey, names));
     } else if (update instanceof Api.UpdateDeleteChannelMessages) {
       events.push({
         type: 'delete',
@@ -483,25 +542,31 @@ export function normalizeGlobalDifference(
       events: [],
       globalState: serializeGlobalPosition({ ...previous, date: result.date, seq: result.seq }),
       complete: true,
+      gap: false,
     };
   }
   if (result instanceof Api.updates.DifferenceTooLong) {
-    // Telegram can no longer replay this gap; the caller must reconcile history itself.
+    // Telegram can no longer replay this range. Store the position it jumped to — repeating
+    // the old pts would only be answered with another gap — and let the caller reconcile.
     return {
       events: [],
       globalState: serializeGlobalPosition({ ...previous, pts: result.pts }),
-      complete: false,
+      complete: true,
+      gap: true,
     };
   }
   const slice = result instanceof Api.updates.DifferenceSlice;
   const state = slice ? result.intermediateState : result.state;
+  const names = entityNames(result.users, result.chats);
   return {
     events: [
-      ...messageEvents(result.newMessages, 'message', polls, selfKey),
-      ...normalizeUpdates(result.otherUpdates, observedAt, polls, selfKey),
+      ...messageEvents(result.newMessages, 'message', polls, selfKey, names),
+      ...normalizeUpdates(result.otherUpdates, observedAt, polls, selfKey, names),
     ],
     globalState: serializeState(state),
+    // A slice is ordinary progress: the caller resumes from the intermediate state.
     complete: !slice,
+    gap: false,
   };
 }
 
@@ -512,24 +577,48 @@ export function normalizeChannelDifference(
   selfKey?: string,
 ): DifferenceResult {
   if (result instanceof Api.updates.ChannelDifferenceEmpty) {
-    return { events: [], channelState: JSON.stringify({ pts: result.pts }), complete: result.final ?? true };
-  }
-  if (result instanceof Api.updates.ChannelDifferenceTooLong) {
-    const pts = result.dialog instanceof Api.Dialog ? result.dialog.pts : undefined;
     return {
-      events: messageEvents(result.messages, 'message', polls, selfKey),
-      channelState: pts === undefined ? undefined : JSON.stringify({ pts }),
-      complete: false,
+      events: [],
+      channelState: JSON.stringify({ pts: result.pts }),
+      complete: result.final ?? true,
+      gap: false,
     };
   }
+  if (result instanceof Api.updates.ChannelDifferenceTooLong) {
+    // The channel state was reset. Nothing further can be fetched by difference, so report a
+    // finished-but-lossy result; `getChannelDifference` reseeds the pts when the dialog omits
+    // it, otherwise the next call would ask for the same lost position again.
+    const pts = result.dialog instanceof Api.Dialog ? result.dialog.pts : undefined;
+    const names = entityNames(result.users, result.chats);
+    return {
+      events: messageEvents(result.messages, 'message', polls, selfKey, names),
+      channelState: pts === undefined ? undefined : JSON.stringify({ pts }),
+      complete: true,
+      gap: true,
+    };
+  }
+  const names = entityNames(result.users, result.chats);
   return {
     events: [
-      ...messageEvents(result.newMessages, 'message', polls, selfKey),
-      ...normalizeUpdates(result.otherUpdates, observedAt, polls, selfKey),
+      ...messageEvents(result.newMessages, 'message', polls, selfKey, names),
+      ...normalizeUpdates(result.otherUpdates, observedAt, polls, selfKey, names),
     ],
     channelState: JSON.stringify({ pts: result.pts }),
     complete: result.final ?? false,
+    gap: false,
   };
+}
+
+/** `messages.GetHistory` reports the chat total in `count`; plain `Messages` is the whole chat. */
+export function historyTotal(result: Api.messages.TypeMessages): number {
+  return result instanceof Api.messages.Messages ? result.messages.length : result.count;
+}
+
+/** Only real files can be fetched; every other descriptor exists to record an attachment. */
+export function isDownloadableMedia(media: Api.TypeMessageMedia | undefined): boolean {
+  if (media instanceof Api.MessageMediaPhoto) return media.photo instanceof Api.Photo;
+  if (media instanceof Api.MessageMediaDocument) return media.document instanceof Api.Document;
+  return false;
 }
 
 /**
@@ -537,7 +626,7 @@ export function normalizeChannelDifference(
  * no send, edit, delete, react, vote, or mark-read call is reachable from here.
  */
 export class GramJsTelegramAdapter implements TelegramAdapter {
-  readonly #client: TelegramClient;
+  readonly #client: TelegramReadClient;
   readonly #peers = new Map<string, Api.TypeInputPeer>();
   readonly #polls = new PollTracker();
   readonly #eventHandlers = new Set<(event: TelegramLiveEvent) => Promise<void>>();
@@ -546,12 +635,11 @@ export class GramJsTelegramAdapter implements TelegramAdapter {
   #registered = false;
 
   constructor(config: TelegramAdapterConfig) {
-    this.#client = new TelegramClient(
-      new StringSession(config.session),
-      config.apiId,
-      config.apiHash,
-      { connectionRetries: 10 },
-    );
+    this.#client =
+      config.client ??
+      new TelegramClient(new StringSession(config.session), config.apiId, config.apiHash, {
+        connectionRetries: 10,
+      });
   }
 
   async connect(): Promise<void> {
@@ -590,10 +678,30 @@ export class GramJsTelegramAdapter implements TelegramAdapter {
     return [...dialogs.values()];
   }
 
+  primePeers(dialogs: readonly TelegramDialog[]): void {
+    for (const dialog of dialogs) {
+      if (this.#peers.has(dialog.peerKey)) continue;
+      const input = inputPeerFromDialog(dialog);
+      if (input) this.#peers.set(dialog.peerKey, input);
+    }
+  }
+
   async countMessages(peerKey: string): Promise<number> {
     const peer = await this.#resolvePeer(peerKey);
-    const messages = await this.#client.getMessages(peer, { limit: 0 });
-    return messages.total ?? 0;
+    // One request for the total. `getMessages({ limit: 0 })` pages through the whole chat.
+    const history = await this.#client.invoke(
+      new Api.messages.GetHistory({
+        peer,
+        offsetId: 0,
+        offsetDate: 0,
+        addOffset: 0,
+        limit: 1,
+        maxId: 0,
+        minId: 0,
+        hash: returnBigInt(0),
+      }),
+    );
+    return historyTotal(history);
   }
 
   async fetchHistoryPage(
@@ -636,22 +744,35 @@ export class GramJsTelegramAdapter implements TelegramAdapter {
     if (!(message instanceof Api.Message)) {
       throw new Error(`telegram message unavailable: ${peerKey}:${messageId}`);
     }
-    if (!normalizeMedia(peerKey, message).some((media) => media.mediaKey === mediaKey)) {
-      throw new Error(`telegram media unavailable: ${mediaKey}`);
+    const descriptor = normalizeMedia(peerKey, message).find(
+      (media) => media.mediaKey === mediaKey,
+    );
+    if (!descriptor) throw new Error(`telegram media unavailable: ${mediaKey}`);
+    if (!isDownloadableMedia(message.media)) {
+      throw new Error(`telegram media is not a downloadable file: ${mediaKey} (${descriptor.kind})`);
     }
-    const result = await this.#client.downloadMedia(message, { outputFile: outputPath });
-    if (result instanceof Buffer) {
-      writeFileSync(outputPath, result);
-      return result.length;
+    // Own the stream so the bytes are known to be flushed before the size is read: gramJS
+    // closes its writer in a `finally` that can settle after downloadMedia() resolves.
+    const stream = createWriteStream(outputPath);
+    try {
+      await this.#client.downloadMedia(message, { outputFile: stream });
+      if (!stream.writableEnded) stream.end();
+      await finished(stream);
+      const { size } = statSync(outputPath);
+      if (size === 0) throw new Error(`telegram media download produced no bytes: ${mediaKey}`);
+      return size;
+    } catch (error) {
+      stream.destroy();
+      rmSync(outputPath, { force: true });
+      throw error;
     }
-    return statSync(outputPath).size;
   }
 
   async getGlobalDifference(state: string | undefined): Promise<DifferenceResult> {
     const position = parseGlobalPosition(state);
     if (!position) {
       const current = await this.#client.invoke(new Api.updates.GetState());
-      return { events: [], globalState: serializeState(current), complete: true };
+      return { events: [], globalState: serializeState(current), complete: true, gap: false };
     }
     const result = await this.#client.invoke(
       new Api.updates.GetDifference({
@@ -676,8 +797,8 @@ export class GramJsTelegramAdapter implements TelegramAdapter {
       // First run for this supergroup: record where to resume without replaying history.
       const seed = await this.#channelPts(peer);
       return seed === undefined
-        ? { events: [], complete: true }
-        : { events: [], channelState: JSON.stringify({ pts: seed }), complete: true };
+        ? { events: [], complete: true, gap: false }
+        : { events: [], channelState: JSON.stringify({ pts: seed }), complete: true, gap: false };
     }
     const result = await this.#client.invoke(
       new Api.updates.GetChannelDifference({
@@ -688,7 +809,19 @@ export class GramJsTelegramAdapter implements TelegramAdapter {
         force: true,
       }),
     );
-    return normalizeChannelDifference(result, new Date().toISOString(), this.#polls, this.#selfKey);
+    const difference = normalizeChannelDifference(
+      result,
+      new Date().toISOString(),
+      this.#polls,
+      this.#selfKey,
+    );
+    if (!difference.gap || difference.channelState !== undefined) return difference;
+    // The gap carried no position. Reseed from the channel itself, otherwise the next call
+    // would repeat the lost pts and be answered with the same gap forever.
+    const seed = await this.#channelPts(peer);
+    return seed === undefined
+      ? difference
+      : { ...difference, channelState: JSON.stringify({ pts: seed }) };
   }
 
   onEvent(handler: (event: TelegramLiveEvent) => Promise<void>): () => void {
@@ -703,8 +836,10 @@ export class GramJsTelegramAdapter implements TelegramAdapter {
 
   async #channelPts(peer: Api.TypeInputPeer): Promise<number | undefined> {
     if (!(peer instanceof Api.InputPeerChannel)) return undefined;
-    const full = await this.#client.invoke(new Api.channels.GetFullChannel({ channel: peer }));
-    return full.fullChat instanceof Api.ChannelFull ? full.fullChat.pts : undefined;
+    const { fullChat } = await this.#client.invoke(
+      new Api.channels.GetFullChannel({ channel: peer }),
+    );
+    return 'pts' in fullChat && typeof fullChat.pts === 'number' ? fullChat.pts : undefined;
   }
 
   async #resolvePeer(peerKey: string): Promise<Api.TypeInputPeer> {
