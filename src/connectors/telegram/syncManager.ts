@@ -26,7 +26,7 @@ const FLOOD_WAIT = /FLOOD(?:_PREMIUM)?_WAIT_(\d+)/i;
  */
 const PERMANENT = new RegExp(
   [
-    'unavailable',
+    'telegram media unavailable:',
     'not a downloadable file',
     'produced no bytes',
     'unknown telegram peer',
@@ -107,9 +107,7 @@ export class TelegramSyncManager {
   private cycles: Promise<unknown> = Promise.resolve();
   private readonly alerted = new Set<string>();
 
-  constructor(private readonly deps: TelegramSyncDeps) {
-    this.recover();
-  }
+  constructor(private readonly deps: TelegramSyncDeps) {}
 
   /**
    * Clears what a crash left behind: work items still claimed by a process that no longer
@@ -125,8 +123,9 @@ export class TelegramSyncManager {
 
   async startImport(peerKey: string): Promise<void> {
     const active = this.deps.store.getImport(peerKey);
-    if (active?.state === 'scanning' || active?.state === 'acquiring') {
-      // Restarting would reset the cursor and counters and re-walk history from the top.
+    if (active?.state === 'scanning' || active?.state === 'acquiring' || active?.state === 'paused') {
+      // Restarting would reset the cursor and counters and re-walk history from the top;
+      // a paused import must be resumed, not recreated, for the same reason.
       throw new Error(`telegram import already running: ${peerKey}`);
     }
     await this.ensureSelectedChat(peerKey);
@@ -163,6 +162,7 @@ export class TelegramSyncManager {
 
   start(): void {
     if (this.running) return;
+    this.recover();
     this.running = true;
     this.loop = this.run();
   }
@@ -188,7 +188,16 @@ export class TelegramSyncManager {
   private async cycle(): Promise<boolean> {
     const at = this.nowIso();
     this.primePeers();
-    if (this.deps.blobs.hasFreeSpace(MIN_FREE_BYTES) && this.deps.store.resumeLowDiskWork(at) > 0) {
+    // Gate on the largest due item's own requirement, not the flat floor: a media item
+    // needs MIN_FREE_BYTES + 2*expectedSize, so resuming at the flat floor alone can lift a
+    // pause only to have it immediately fail the same math and repause, defeating the
+    // dedupe below every retry window.
+    const required = this.deps.store.maxDuePausedLowDiskRequirement(at, MIN_FREE_BYTES, COPY_FACTOR);
+    if (
+      required !== undefined &&
+      this.deps.blobs.hasFreeSpace(required) &&
+      this.deps.store.resumeLowDiskWork(at) > 0
+    ) {
       this.alerted.delete(LOW_DISK_ALERT);
     }
     const job = this.deps.store.claimImport(at);

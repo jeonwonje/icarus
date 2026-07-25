@@ -730,6 +730,30 @@ export class TelegramArchiveStore {
       );
   }
 
+  /**
+   * The largest free-space floor a due low-disk pause actually needs, computed per item
+   * (media scales with `expectedSize`; anything else needs only the flat floor). Gating a
+   * resume attempt on this — rather than on the flat floor alone — is what keeps an item
+   * from resuming only to immediately fail the same math and repause, defeating the alert
+   * dedupe every retry window.
+   */
+  maxDuePausedLowDiskRequirement(at: string, minFreeBytes: number, copyFactor: number): number | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT MAX(
+           CASE WHEN w.kind='media' THEN ?+?*COALESCE(m.expected_size,0) ELSE ? END
+         ) AS required
+         FROM tg_work_items w
+         LEFT JOIN tg_media m ON w.kind='media' AND m.media_key=w.item_key
+         WHERE w.state='paused' AND w.last_error LIKE ?
+           AND (w.next_retry_at IS NULL OR w.next_retry_at<=?)`,
+      )
+      .get(minFreeBytes, copyFactor, minFreeBytes, `${LOW_DISK_PREFIX}%`, at) as unknown as {
+      required: number | null;
+    };
+    return row.required ?? undefined;
+  }
+
   /** Lifts only the lane's own low-disk pauses; storage faults stay paused for a human. */
   resumeLowDiskWork(at: string): number {
     // The lane asks this every cycle, so stay a pure read until there is something to lift.

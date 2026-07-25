@@ -136,6 +136,37 @@ test('low disk pauses media but leaves message metadata committed', async () => 
   assert.equal(notifications.filter((text) => /low disk/.test(text)).length, 1);
 });
 
+test('low disk alert stays deduped when free space clears the flat floor but not a paused item\'s own requirement', async () => {
+  // 11 GiB clears MIN_FREE_BYTES (10 GiB) but not this item's own MIN_FREE_BYTES + 2*expectedSize
+  // (10 GiB + 2 GiB = 12 GiB): a band where a flat-floor resume would immediately repause.
+  const free = 11 * 1024 ** 3;
+  let at = Date.parse(FIXED);
+  const { manager, db, notifications } = makeMediaHarness({
+    media: [{ mediaKey: 'photo:1', kind: 'photo', descriptorJson: '{}', size: 1024 ** 3 }],
+    freeBytes: free,
+    clock: () => new Date(at),
+  });
+  await manager.runOneCycle();
+  assert.equal(
+    (db.prepare(`SELECT state FROM tg_work_items`).get() as unknown as { state: string }).state,
+    'paused',
+  );
+  assert.equal(notifications.filter((text) => /low disk/.test(text)).length, 1);
+
+  // Each low-disk retry window comes due, but the item's real requirement is never met at
+  // this free-space level. Resuming it anyway would repause it and re-fire the alert the
+  // dedupe set exists to suppress.
+  for (let round = 0; round < 3; round++) {
+    at += 11 * 60 * 1000;
+    await manager.runOneCycle();
+  }
+  assert.equal(
+    (db.prepare(`SELECT state FROM tg_work_items`).get() as unknown as { state: string }).state,
+    'paused',
+  );
+  assert.equal(notifications.filter((text) => /low disk/.test(text)).length, 1);
+});
+
 test('recovered disk space resumes paused media and stores the blob', async () => {
   let free = 9 * 1024 ** 3;
   let at = Date.parse(FIXED);
@@ -359,6 +390,7 @@ test('a crash mid-item is recovered by the next manager and the import completes
   writeFileSync(path.join(root, 'tmp', `work-${claimed?.id}.part`), 'half a photo');
 
   const restarted = new TelegramSyncManager(deps);
+  restarted.recover();
   assert.deepEqual(readdirSync(path.join(root, 'tmp')), []);
   assert.equal(
     (db.prepare(`SELECT state FROM tg_work_items`).get() as unknown as { state: string }).state,
