@@ -3,6 +3,11 @@ import { convert } from 'html-to-text';
 const MAX_BODY = 5 * 1024 * 1024;
 const MAX_TEXT = 1024 * 1024;
 const DEADLINE_MS = 20_000;
+const ACCEPTED_MEDIA_TYPES = new Set([
+  'application/json',
+  'application/xml',
+  'application/xhtml+xml',
+]);
 
 export type LinkSnapshotResult =
   | {
@@ -42,6 +47,14 @@ const readBoundedBody = async (response: Response): Promise<Uint8Array | undefin
   return body;
 };
 
+const cancelBody = async (response: Response): Promise<void> => {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // The request is already unavailable; a cancellation race must not replace that result.
+  }
+};
+
 export class LinkSnapshotter {
   constructor(private readonly fetcher: typeof fetch = fetch) {}
 
@@ -55,20 +68,24 @@ export class LinkSnapshotter {
       });
       const finalUrl = response.url || url;
       if (!response.ok) {
+        await cancelBody(response);
         return { status: 'unavailable', finalUrl, error: `HTTP ${response.status}` };
       }
       const declared = Number(response.headers.get('content-length') ?? '0');
       if (declared > MAX_BODY) {
+        await cancelBody(response);
         return { status: 'unavailable', finalUrl, error: 'response exceeds 5 MB' };
       }
       const contentType = response.headers.get('content-type') ?? '';
-      if (!/^(text\/|application\/(json|xml|xhtml\+xml))/i.test(contentType)) {
+      const mediaType = contentType.split(';', 1)[0].trim().toLowerCase();
+      if (!mediaType.startsWith('text/') && !ACCEPTED_MEDIA_TYPES.has(mediaType)) {
+        await cancelBody(response);
         return { status: 'unavailable', finalUrl, error: `unsupported ${contentType}` };
       }
       const bytes = await readBoundedBody(response);
       if (!bytes) return { status: 'unavailable', finalUrl, error: 'response exceeds 5 MB' };
       const raw = new TextDecoder().decode(bytes);
-      const text = contentType.includes('html')
+      const text = mediaType === 'text/html' || mediaType === 'application/xhtml+xml'
         ? convert(raw, {
             selectors: [
               { selector: 'script', format: 'skip' },

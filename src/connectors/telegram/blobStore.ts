@@ -97,7 +97,9 @@ export class TelegramBlobStore {
     const linkDir = path.join(this.root, 'links', 'sha256', hash.slice(0, 2));
     if (!existsSync(linkDir)) return;
     for (const name of readdirSync(linkDir)) {
-      if (name.startsWith(`${hash}.`)) rmSync(path.join(linkDir, name), { force: true });
+      if (name === hash || name.startsWith(`${hash}.`)) {
+        rmSync(path.join(linkDir, name), { force: true });
+      }
     }
   }
 }
