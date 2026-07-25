@@ -156,6 +156,20 @@ interface RawMessageRow {
   deleted_at: string | null;
 }
 
+interface RawWindowRow {
+  peer_key: string;
+  message_id: number;
+  sender_key: string | null;
+  sender_name: string | null;
+  sent_at: string;
+  edited_at: string | null;
+  deleted_at: string | null;
+  text: string;
+  chat_title: string;
+  chat_kind: TelegramPeerKind;
+  chat_username: string | null;
+}
+
 const mapChatRow = (row: RawChatRow): TelegramChatRow => ({
   peerKey: row.peer_key,
   kind: row.kind,
@@ -1503,6 +1517,147 @@ export class TelegramArchiveStore {
       )
       .get(peerKey, messageId) as unknown as RawMessageRow | undefined;
     return row ? mapMessageRow(row) : undefined;
+  }
+
+  searchFts(input: {
+    match: string;
+    peerKey?: string;
+    includeDeleted: boolean;
+    limit: number;
+  }): {
+    peerKey: string;
+    messageId: number;
+    senderKey?: string;
+    senderName?: string;
+    sentAt: string;
+    editedAt?: string;
+    deletedAt?: string;
+    text: string;
+    chatTitle: string;
+    chatKind: TelegramPeerKind;
+    chatUsername?: string;
+  }[] {
+    const rows = this.db
+      .prepare(
+        `
+      SELECT m.peer_key, m.message_id, m.sender_key, m.sender_name, m.sent_at, m.edited_at,
+             m.deleted_at, m.text, c.title AS chat_title, c.kind AS chat_kind, c.username AS chat_username
+      FROM tg_message_fts f
+      JOIN tg_messages m ON m.peer_key=f.peer_key AND m.message_id=f.message_id
+      JOIN tg_chats c ON c.peer_key=m.peer_key
+      WHERE tg_message_fts MATCH ?
+        AND c.selected=1
+        AND (? IS NULL OR m.peer_key=?)
+        AND (?=1 OR m.deleted_at IS NULL)
+      ORDER BY rank
+      LIMIT ?
+    `,
+      )
+      .all(
+        input.match,
+        input.peerKey ?? null,
+        input.peerKey ?? null,
+        input.includeDeleted ? 1 : 0,
+        input.limit,
+      ) as unknown as RawWindowRow[];
+    return rows.map((r) => ({
+      peerKey: r.peer_key,
+      messageId: r.message_id,
+      senderKey: r.sender_key ?? undefined,
+      senderName: r.sender_name ?? undefined,
+      sentAt: r.sent_at,
+      editedAt: r.edited_at ?? undefined,
+      deletedAt: r.deleted_at ?? undefined,
+      text: r.text,
+      chatTitle: r.chat_title,
+      chatKind: r.chat_kind,
+      chatUsername: r.chat_username ?? undefined,
+    }));
+  }
+
+  loadMessageWindow(input: {
+    peerKey: string;
+    messageId: number;
+    before: number;
+    after: number;
+    includeDeleted: boolean;
+  }): {
+    peerKey: string;
+    messageId: number;
+    senderKey?: string;
+    senderName?: string;
+    sentAt: string;
+    editedAt?: string;
+    deletedAt?: string;
+    text: string;
+    chatTitle: string;
+    chatKind: TelegramPeerKind;
+    chatUsername?: string;
+  }[] {
+    const deletedClause = input.includeDeleted ? '' : 'AND deleted_at IS NULL';
+    const beforeRows = this.db
+      .prepare(
+        `
+      SELECT m.peer_key, m.message_id, m.sender_key, m.sender_name, m.sent_at, m.edited_at,
+             m.deleted_at, m.text, c.title AS chat_title, c.kind AS chat_kind, c.username AS chat_username
+      FROM tg_messages m JOIN tg_chats c ON c.peer_key=m.peer_key
+      WHERE m.peer_key=? AND m.message_id<? ${deletedClause}
+      ORDER BY m.message_id DESC LIMIT ?
+    `,
+      )
+      .all(input.peerKey, input.messageId, input.before) as unknown as RawWindowRow[];
+    const anchor = this.db
+      .prepare(
+        `
+      SELECT m.peer_key, m.message_id, m.sender_key, m.sender_name, m.sent_at, m.edited_at,
+             m.deleted_at, m.text, c.title AS chat_title, c.kind AS chat_kind, c.username AS chat_username
+      FROM tg_messages m JOIN tg_chats c ON c.peer_key=m.peer_key
+      WHERE m.peer_key=? AND m.message_id=?
+    `,
+      )
+      .get(input.peerKey, input.messageId) as unknown as RawWindowRow | undefined;
+    const afterRows = this.db
+      .prepare(
+        `
+      SELECT m.peer_key, m.message_id, m.sender_key, m.sender_name, m.sent_at, m.edited_at,
+             m.deleted_at, m.text, c.title AS chat_title, c.kind AS chat_kind, c.username AS chat_username
+      FROM tg_messages m JOIN tg_chats c ON c.peer_key=m.peer_key
+      WHERE m.peer_key=? AND m.message_id>? ${deletedClause}
+      ORDER BY m.message_id ASC LIMIT ?
+    `,
+      )
+      .all(input.peerKey, input.messageId, input.after) as unknown as RawWindowRow[];
+    if (!anchor) return [];
+    const map = (r: RawWindowRow) => ({
+      peerKey: r.peer_key,
+      messageId: r.message_id,
+      senderKey: r.sender_key ?? undefined,
+      senderName: r.sender_name ?? undefined,
+      sentAt: r.sent_at,
+      editedAt: r.edited_at ?? undefined,
+      deletedAt: r.deleted_at ?? undefined,
+      text: r.text,
+      chatTitle: r.chat_title,
+      chatKind: r.chat_kind,
+      chatUsername: r.chat_username ?? undefined,
+    });
+    return [...beforeRows.reverse().map(map), map(anchor), ...afterRows.map(map)];
+  }
+
+  messageHasMedia(peerKey: string, messageId: number): boolean {
+    return (
+      this.db
+        .prepare(`SELECT 1 AS ok FROM tg_media WHERE peer_key=? AND message_id=? LIMIT 1`)
+        .get(peerKey, messageId) !== undefined
+    );
+  }
+
+  messageHasLinks(peerKey: string, messageId: number): boolean {
+    return (
+      this.db
+        .prepare(`SELECT 1 AS ok FROM tg_links WHERE peer_key=? AND message_id=? LIMIT 1`)
+        .get(peerKey, messageId) !== undefined
+    );
   }
 
   setHealth(state: TelegramHealthState, error?: string): void {
