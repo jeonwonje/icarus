@@ -538,8 +538,8 @@ test('concurrent cycles serialize instead of double-fetching the same page', asy
 
 test('start and stop run the lane without leaving a cycle in flight', async () => {
   const { manager, store } = makeMediaHarness({ acquiring: true });
-  manager.start();
-  manager.start();
+  // A second start must join the first rather than raising a second lane.
+  await Promise.all([manager.start(), manager.start()]);
   for (let i = 0; i < 100 && store.getImport('dm:1')?.state !== 'complete'; i++) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }

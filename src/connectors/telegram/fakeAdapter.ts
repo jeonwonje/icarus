@@ -13,6 +13,9 @@ export interface FakeTelegramData {
   messages: Record<string, TelegramMessage[]>;
   globalDifferences?: DifferenceResult[];
   channelDifferences?: Record<string, DifferenceResult[]>;
+  /** Positions handed back when nothing is persisted yet, as the real seeding calls do. */
+  globalSeed?: string;
+  channelSeeds?: Record<string, string>;
   /** Keyed by `${peerKey}:${messageId}:${mediaKey}` or by the media key alone. */
   mediaFiles?: Record<string, Buffer>;
 }
@@ -27,6 +30,8 @@ export class FakeTelegramAdapter implements TelegramAdapter {
   readonly downloads: string[] = [];
   /** Peer keys seeded from persisted dialogs, in the order they were primed. */
   readonly primedPeers: string[] = [];
+  /** Every difference request as `global` or `channel:<peerKey>`, in call order. */
+  readonly differenceRequests: string[] = [];
   private readonly eventHandlers = new Set<(event: TelegramLiveEvent) => Promise<void>>();
   private readonly connectionHandlers = new Set<(connected: boolean) => void>();
 
@@ -95,14 +100,33 @@ export class FakeTelegramAdapter implements TelegramAdapter {
     return content.length;
   }
 
-  async getGlobalDifference(_state: string | undefined): Promise<DifferenceResult> {
+  async getGlobalDifference(state: string | undefined): Promise<DifferenceResult> {
+    this.differenceRequests.push('global');
+    // With no persisted position there is nothing to replay, only a position to seed.
+    if (state === undefined) {
+      return {
+        events: [],
+        globalState: this.data.globalSeed ?? '{"pts":1}',
+        complete: true,
+        gap: false,
+      };
+    }
     return this.data.globalDifferences?.shift() ?? { events: [], complete: true, gap: false };
   }
 
   async getChannelDifference(
     peerKey: string,
-    _state: string | undefined,
+    state: string | undefined,
   ): Promise<DifferenceResult> {
+    this.differenceRequests.push(`channel:${peerKey}`);
+    if (state === undefined) {
+      return {
+        events: [],
+        channelState: this.data.channelSeeds?.[peerKey] ?? '{"pts":1}',
+        complete: true,
+        gap: false,
+      };
+    }
     return (
       this.data.channelDifferences?.[peerKey]?.shift() ?? {
         events: [],

@@ -1,10 +1,16 @@
+import { createHash } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { log } from '../../log.js';
-import type { TelegramArchiveStore, TelegramImportRow, TelegramWorkItem } from './archiveStore.js';
+import type {
+  TelegramArchiveStore,
+  TelegramChatRow,
+  TelegramImportRow,
+  TelegramWorkItem,
+} from './archiveStore.js';
 import type { TelegramBlobStore } from './blobStore.js';
 import type { LinkSnapshotter } from './linkSnapshot.js';
-import type { TelegramAdapter } from './types.js';
+import type { DifferenceResult, TelegramAdapter, TelegramLiveEvent } from './types.js';
 
 const PAGE_SIZE = 100;
 const MIN_FREE_BYTES = 10 * 1024 ** 3;
@@ -18,6 +24,18 @@ const LOW_DISK_RETRY_MS = 600_000;
 const BUSY_SLEEP_MS = 1_000;
 const IDLE_SLEEP_MS = 5_000;
 const LOW_DISK_ALERT = 'low-disk';
+/**
+ * A catch-up must end. Telegram pages differences, but a peer that keeps promising more is a
+ * loop, so the remainder is reported as a gap instead of being requested forever.
+ */
+const MAX_DIFFERENCE_PAGES = 100;
+/** Telegram's own global update position, covering direct messages and basic groups. */
+const GLOBAL_STATE_KEY = 'global';
+/** Records which session value the one authorization alert was already sent for. */
+const AUTH_ALERT_KEY = 'auth-alert';
+const channelStateKey = (peerKey: string): string => `channel:${peerKey}`;
+/** Highest message id this chat has been seen to reach live; the triage floor for replays. */
+const liveStateKey = (peerKey: string): string => `live:${peerKey}`;
 
 const FLOOD_WAIT = /FLOOD(?:_PREMIUM)?_WAIT_(\d+)/i;
 /**
@@ -92,6 +110,25 @@ export interface TelegramSyncDeps {
   notify: (text: string) => Promise<void>;
   pageSize?: number;
   clock?: () => Date;
+  /**
+   * The session string, used only to key the single authorization alert. Nothing but a hash
+   * of it is ever persisted.
+   */
+  session?: string;
+  /** Called for messages that are new to this account, never for backfill or replay. */
+  onNewLiveMessage?: (peerKey: string, messageId: number) => void;
+}
+
+/** A new message an event committed, so the live watermark can follow it. */
+interface AppliedMessage {
+  peerKey: string;
+  messageId: number;
+}
+
+/** `<peerKey>:<messageId>` is the queue key for a targeted fetch; peer keys contain colons. */
+function targetedMessageId(itemKey: string): number | undefined {
+  const messageId = Number(itemKey.slice(itemKey.lastIndexOf(':') + 1));
+  return Number.isInteger(messageId) ? messageId : undefined;
 }
 
 /**
@@ -105,6 +142,20 @@ export class TelegramSyncManager {
   private wake: (() => void) | undefined;
   /** Serializes cycles: concurrent callers queue behind the one already in flight. */
   private cycles: Promise<unknown> = Promise.resolve();
+  /** Serializes archive writes so a replayed batch cannot interleave with a live edit. */
+  private applying: Promise<void> = Promise.resolve();
+  /** The chain of catch-up passes; `waitForReconciliation` drains it. */
+  private reconciliation: Promise<void> = Promise.resolve();
+  private startup: Promise<void> | undefined;
+  private readonly subscriptions: (() => void)[] = [];
+  private reconnectTimer: NodeJS.Timeout | undefined;
+  private reconnectAttempts = 0;
+  private authorizationFailed = false;
+  /**
+   * Cleared only by an observed disconnect. A lane driven without `start()` has no connection
+   * to observe and assumes it can read, which is what the acquisition tests rely on.
+   */
+  private reachable = true;
   private readonly alerted = new Set<string>();
 
   constructor(private readonly deps: TelegramSyncDeps) {}
@@ -160,18 +211,389 @@ export class TelegramSyncManager {
     return requeued > 0 || resumed;
   }
 
-  start(): void {
-    if (this.running) return;
-    this.recover();
-    this.running = true;
-    this.loop = this.run();
+  /**
+   * Brings the connector up in an order the persisted health can be trusted in: `connecting`,
+   * then a connected and authorized adapter, then live handlers, then a full difference pass —
+   * and only then `connected`. Repeated calls await the same startup.
+   */
+  start(): Promise<void> {
+    this.startup ??= this.bootstrap();
+    return this.startup;
   }
 
   async stop(): Promise<void> {
     this.running = false;
+    const startup = this.startup;
+    this.startup = undefined;
+    this.clearReconnect();
+    // Detach first: nothing new may be chained while the in-flight work drains.
+    for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
     this.wake?.();
+    await startup?.catch(() => undefined);
     await this.loop;
     this.loop = undefined;
+    await this.waitForReconciliation();
+    await this.applying;
+    try {
+      await this.deps.adapter.disconnect();
+    } catch (error) {
+      log.warn({ err: error }, 'telegram sync disconnect failed');
+    }
+  }
+
+  /**
+   * Resolves once no catch-up pass is in flight. A reconnect that lands while waiting chains
+   * another pass, so the wait continues until the chain stops growing.
+   */
+  async waitForReconciliation(): Promise<void> {
+    let awaited: Promise<void> | undefined;
+    while (awaited !== this.reconciliation) {
+      awaited = this.reconciliation;
+      await awaited;
+    }
+  }
+
+  private async bootstrap(): Promise<void> {
+    this.running = true;
+    this.authorizationFailed = false;
+    this.recover();
+    this.deps.store.setHealth('connecting');
+    try {
+      await this.deps.adapter.connect();
+      if (!(await this.verifyAuthorization())) return;
+    } catch (error) {
+      log.warn({ err: error }, 'telegram sync could not connect');
+      this.reachable = false;
+      this.deps.store.setHealth('temporarily_offline', messageOf(error));
+      this.registerHandlers();
+      this.scheduleReconnect();
+      if (this.running) this.loop ??= this.run();
+      return;
+    }
+    this.registerHandlers();
+    // Catch up before the acquisition lane competes for the same connection.
+    this.resync(true);
+    await this.waitForReconciliation();
+    if (this.running) this.loop ??= this.run();
+  }
+
+  private registerHandlers(): void {
+    this.subscriptions.push(
+      this.deps.adapter.onEvent(this.handleEvent),
+      this.deps.adapter.onConnectionChange(this.handleConnectionChange),
+    );
+  }
+
+  private readonly handleEvent = async (event: TelegramLiveEvent): Promise<void> => {
+    if (!this.running) return;
+    await this.serialize(async () => {
+      try {
+        await this.applyEvents([event], 'live');
+      } catch (error) {
+        // One bad event must not take the adapter's dispatch loop down with it.
+        log.warn({ err: error, type: event.type }, 'telegram live event failed');
+      }
+    });
+  };
+
+  private readonly handleConnectionChange = (connected: boolean): void => {
+    if (!this.running || this.authorizationFailed) return;
+    if (!connected) {
+      this.reachable = false;
+      this.deps.store.setHealth('temporarily_offline');
+      this.scheduleReconnect();
+      return;
+    }
+    this.reachable = true;
+    this.clearReconnect();
+    this.reconnectAttempts = 0;
+    // Health stays short of `connected` until the difference pass below has committed.
+    this.deps.store.setHealth('connecting');
+    this.resync();
+  };
+
+  /** Chains one catch-up pass. `runResync` records its own failures and never rejects. */
+  private resync(authorized = false): void {
+    this.reconciliation = this.reconciliation.then(() => this.runResync(authorized));
+  }
+
+  private async runResync(authorized: boolean): Promise<void> {
+    if (!this.running) return;
+    try {
+      if (!authorized && !(await this.verifyAuthorization())) return;
+      const gaps = await this.reconcile();
+      if (!this.running) return;
+      this.deps.store.setHealth(
+        'connected',
+        gaps.size === 0
+          ? undefined
+          : `unresolved update gap · ${gaps.size} chat${gaps.size === 1 ? '' : 's'}`,
+      );
+    } catch (error) {
+      log.warn({ err: error }, 'telegram difference recovery failed');
+      if (!this.running || this.authorizationFailed) return;
+      this.deps.store.setHealth('temporarily_offline', messageOf(error));
+      this.scheduleReconnect();
+    }
+  }
+
+  /**
+   * Catches the archive up through the difference APIs. Positions are persisted only after
+   * their events commit, so an interrupted pass replays a range instead of skipping it.
+   * Returns the chats Telegram could no longer replay.
+   */
+  private async reconcile(): Promise<Set<string>> {
+    this.primePeers();
+    const chats = this.deps.store.listSelectedChats();
+    const floors = this.triageFloors(chats);
+    const gaps = new Set<string>();
+    const globalGap = await this.catchUp(
+      GLOBAL_STATE_KEY,
+      (state) => this.deps.adapter.getGlobalDifference(state),
+      (result) => result.globalState,
+      floors,
+    );
+    // The global position covers every chat that is not its own channel.
+    if (globalGap) for (const chat of chats) if (chat.kind !== 'supergroup') gaps.add(chat.peerKey);
+    for (const chat of chats) {
+      if (chat.kind !== 'supergroup') continue;
+      const gap = await this.catchUp(
+        channelStateKey(chat.peerKey),
+        (state) => this.deps.adapter.getChannelDifference(chat.peerKey, state),
+        (result) => result.channelState,
+        floors,
+      );
+      if (gap) gaps.add(chat.peerKey);
+    }
+    for (const peerKey of gaps) await this.recoverRecentHistory(peerKey, floors);
+    this.deps.store.markReconciled(
+      chats.map((chat) => chat.peerKey),
+      this.nowIso(),
+      gaps,
+    );
+    return gaps;
+  }
+
+  /** Drains one difference stream. Returns whether it ended with an unresolved gap. */
+  private async catchUp(
+    stateKey: string,
+    request: (state: string | undefined) => Promise<DifferenceResult>,
+    positionOf: (result: DifferenceResult) => string | undefined,
+    floors: ReadonlyMap<string, number>,
+  ): Promise<boolean> {
+    let gap = false;
+    for (let page = 0; page < MAX_DIFFERENCE_PAGES; page++) {
+      const result = await request(this.deps.store.getUpdateState(stateKey));
+      await this.serialize(() => this.applyEvents(result.events, 'difference', floors));
+      const position = positionOf(result);
+      // A gap still advances the position: asking for the lost one again only returns it.
+      if (position !== undefined) this.deps.store.setUpdateState(stateKey, position, this.nowIso());
+      if (result.gap) gap = true;
+      if (result.complete) return gap;
+    }
+    log.warn({ stateKey }, 'telegram difference never completed within its page budget');
+    return true;
+  }
+
+  /**
+   * Best effort after a gap: Telegram will not replay the lost range, so the newest page of the
+   * chat is re-read instead. It cannot prove what was deleted while the connector was away, so
+   * missing ids are never turned into tombstones.
+   */
+  private async recoverRecentHistory(
+    peerKey: string,
+    floors: ReadonlyMap<string, number>,
+  ): Promise<void> {
+    try {
+      const page = await this.deps.adapter.fetchHistoryPage(
+        peerKey,
+        null,
+        this.deps.pageSize ?? PAGE_SIZE,
+      );
+      const events = page.messages.map(
+        (message): TelegramLiveEvent => ({ type: 'message', message }),
+      );
+      await this.serialize(() => this.applyEvents(events, 'difference', floors));
+    } catch (error) {
+      log.warn({ err: error, peerKey }, 'telegram gap history recovery failed');
+    }
+  }
+
+  /**
+   * Applies one batch and only then advances each chat's live watermark, so a batch that fails
+   * halfway is replayed rather than silently losing its triage eligibility. Only new messages
+   * move the watermark: an edit may be the first sight of an old message, and raising the
+   * floor to it would hide everything the next replay still owes triage.
+   */
+  private async applyEvents(
+    events: readonly TelegramLiveEvent[],
+    origin: 'live' | 'difference',
+    floors?: ReadonlyMap<string, number>,
+  ): Promise<void> {
+    const highest = new Map<string, number>();
+    for (const event of events) {
+      const applied = await this.handleLiveEvent(event, origin, floors);
+      if (!applied) continue;
+      highest.set(applied.peerKey, Math.max(highest.get(applied.peerKey) ?? 0, applied.messageId));
+    }
+    for (const [peerKey, messageId] of highest) this.advanceLiveWatermark(peerKey, messageId);
+  }
+
+  private async handleLiveEvent(
+    event: TelegramLiveEvent,
+    origin: 'live' | 'difference',
+    floors?: ReadonlyMap<string, number>,
+  ): Promise<AppliedMessage | undefined> {
+    switch (event.type) {
+      case 'message':
+      case 'edit': {
+        const { peerKey, messageId } = event.message;
+        if (!this.deps.store.isSelected(peerKey)) return undefined;
+        this.deps.store.applyMessages([event.message], origin);
+        if (event.type === 'edit') return undefined;
+        if (this.isNewForTriage(peerKey, messageId, origin, floors)) {
+          this.deps.store.markTriageEligible(peerKey, messageId);
+          this.deps.onNewLiveMessage?.(peerKey, messageId);
+        }
+        return { peerKey, messageId };
+      }
+      case 'delete':
+        // A peer-less deletion is resolved by the store from account-wide message ids.
+        if (event.peerKey && !this.deps.store.isSelected(event.peerKey)) return undefined;
+        this.deps.store.markDeleted(event.peerKey, event.messageIds, event.observedAt);
+        return undefined;
+      case 'reactions':
+        if (!this.deps.store.isSelected(event.peerKey)) return undefined;
+        if (
+          !this.deps.store.replaceReactions(
+            event.peerKey,
+            event.messageId,
+            event.reactionsJson,
+            event.observedAt,
+          )
+        ) {
+          this.deps.store.enqueueTargetedFetch(event.peerKey, event.messageId);
+        }
+        return undefined;
+      case 'poll':
+        if (!this.deps.store.isSelected(event.peerKey)) return undefined;
+        if (
+          !this.deps.store.replacePoll(
+            event.peerKey,
+            event.messageId,
+            event.poll,
+            event.observedAt,
+          )
+        ) {
+          this.deps.store.enqueueTargetedFetch(event.peerKey, event.messageId);
+        }
+        return undefined;
+    }
+  }
+
+  /**
+   * A live arrival is new by definition. A replayed message is new only above the watermark the
+   * chat had reached before the pass began; a chat with no live watermark yet is treated as
+   * backfill, so a first catch-up never floods triage with history.
+   */
+  private isNewForTriage(
+    peerKey: string,
+    messageId: number,
+    origin: 'live' | 'difference',
+    floors?: ReadonlyMap<string, number>,
+  ): boolean {
+    if (origin === 'live') return true;
+    return messageId > (floors?.get(peerKey) ?? Number.MAX_SAFE_INTEGER);
+  }
+
+  private triageFloors(chats: readonly TelegramChatRow[]): Map<string, number> {
+    const floors = new Map<string, number>();
+    for (const chat of chats) {
+      const watermark = this.liveWatermark(chat.peerKey);
+      if (watermark !== undefined) floors.set(chat.peerKey, watermark);
+    }
+    return floors;
+  }
+
+  private liveWatermark(peerKey: string): number | undefined {
+    const raw = this.deps.store.getUpdateState(liveStateKey(peerKey));
+    const parsed = raw === undefined ? Number.NaN : Number(raw);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+  }
+
+  private advanceLiveWatermark(peerKey: string, messageId: number): void {
+    if (messageId <= (this.liveWatermark(peerKey) ?? -1)) return;
+    this.deps.store.setUpdateState(liveStateKey(peerKey), String(messageId));
+  }
+
+  /**
+   * Serializes archive writes from live events, difference replay, and gap recovery. They all
+   * write the same rows, so overlapping batches could otherwise commit a replayed older version
+   * on top of a newer live edit.
+   */
+  private serialize<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.applying.then(task);
+    this.applying = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  /**
+   * A dead session cannot be retried into life, so this stops network sync and alerts once for
+   * the session value it applies to. The archive stays readable.
+   */
+  private async verifyAuthorization(): Promise<boolean> {
+    const fingerprint = createHash('sha256')
+      .update(this.deps.session ?? '')
+      .digest('hex')
+      .slice(0, 16);
+    if (await this.deps.adapter.isAuthorized()) {
+      if (this.deps.store.getUpdateState(AUTH_ALERT_KEY) !== undefined) {
+        this.deps.store.setUpdateState(AUTH_ALERT_KEY, '');
+      }
+      return true;
+    }
+    this.authorizationFailed = true;
+    this.clearReconnect();
+    this.deps.store.setHealth('authorization_failed', 'telegram authorization failed');
+    if (this.deps.store.getUpdateState(AUTH_ALERT_KEY) !== fingerprint) {
+      this.deps.store.setUpdateState(AUTH_ALERT_KEY, fingerprint);
+      await this.announce('telegram authorization failed · run npm run tg-setup, then /restart');
+    }
+    return false;
+  }
+
+  /**
+   * Waits out a disconnect at 30 seconds, 2 minutes, then 10 minutes, staying at 10 minutes
+   * afterwards: an outage that outlasts the schedule is still worth reconnecting from.
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer || !this.running || this.authorizationFailed) return;
+    const delay = RETRY_DELAYS_MS[Math.min(this.reconnectAttempts, RETRY_DELAYS_MS.length - 1)];
+    this.reconnectTimer = setTimeout(() => void this.reconnect(), delay);
+    this.reconnectTimer.unref?.();
+  }
+
+  private async reconnect(): Promise<void> {
+    this.reconnectTimer = undefined;
+    this.reconnectAttempts += 1;
+    if (!this.running || this.authorizationFailed) return;
+    try {
+      // A successful connect notifies the connection handler, which runs the catch-up pass.
+      await this.deps.adapter.connect();
+    } catch (error) {
+      log.warn({ err: error, attempts: this.reconnectAttempts }, 'telegram reconnect failed');
+      this.reachable = false;
+      this.deps.store.setHealth('temporarily_offline', messageOf(error));
+      this.scheduleReconnect();
+    }
+  }
+
+  private clearReconnect(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
   }
 
   /**
@@ -186,6 +608,9 @@ export class TelegramSyncManager {
   }
 
   private async cycle(): Promise<boolean> {
+    // Nothing can be fetched over a dead session or a dropped connection, and every attempt
+    // that tries anyway spends an import's bounded retry budget on the outage.
+    if (this.authorizationFailed || !this.reachable) return false;
     const at = this.nowIso();
     this.primePeers();
     // Gate on the largest due item's own requirement, not the flat floor: a media item
@@ -292,6 +717,7 @@ export class TelegramSyncManager {
     try {
       if (item.kind === 'media') await this.processMedia(item, at);
       else if (item.kind === 'link') await this.processLink(item, at);
+      else if (item.kind === 'targeted_fetch') await this.processTargetedFetch(item);
       else this.deps.store.failWorkItem(item.id, `unsupported work kind: ${item.kind}`);
     } catch (error) {
       await this.recordWorkFailure(item, error, at);
@@ -351,6 +777,29 @@ export class TelegramSyncManager {
       blobHash: stored.hash,
       bytes: stored.bytes,
     });
+  }
+
+  /**
+   * Fills in a message an edit, reaction, or poll update referred to before the archive had it.
+   * A message Telegram no longer returns is not invented: the event simply had nothing to
+   * attach to, and the queue entry is closed.
+   */
+  private async processTargetedFetch(item: TelegramWorkItem): Promise<void> {
+    const messageId = targetedMessageId(item.itemKey);
+    if (messageId === undefined) {
+      this.deps.store.failWorkItem(item.id, `unreadable targeted fetch key: ${item.itemKey}`);
+      return;
+    }
+    if (!this.deps.store.isSelected(item.peerKey)) {
+      this.deps.store.completeWorkItem(item.id);
+      return;
+    }
+    const message = await this.deps.adapter.fetchMessage(item.peerKey, messageId);
+    if (message) {
+      // Recovery, not an arrival: this must not make an old message eligible for triage.
+      await this.serialize(async () => this.deps.store.applyMessages([message], 'difference'));
+    }
+    this.deps.store.completeWorkItem(item.id);
   }
 
   private async processLink(item: TelegramWorkItem, at: string): Promise<void> {

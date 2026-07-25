@@ -10,6 +10,7 @@ import { FakeTelegramAdapter } from '../src/connectors/telegram/fakeAdapter.js';
 import { LinkSnapshotter } from '../src/connectors/telegram/linkSnapshot.js';
 import { TelegramSyncManager } from '../src/connectors/telegram/syncManager.js';
 import type {
+  DifferenceResult,
   TelegramLinkDescriptor,
   TelegramMediaDescriptor,
   TelegramMessage,
@@ -104,6 +105,74 @@ export function makeMediaHarness(options: WorkHarnessOptions = {}) {
   };
   const manager = new TelegramSyncManager(deps);
   return { manager, deps, db, store, adapter, root, notifications };
+}
+
+export function message(
+  peerKey: string,
+  messageId: number,
+  text: string,
+  editedAt?: string,
+): TelegramMessage {
+  return {
+    peerKey,
+    messageId,
+    senderKey: 'user:1',
+    senderName: 'Alice',
+    sentAt: '2026-01-01T00:00:00.000Z',
+    editedAt,
+    text,
+    entitiesJson: '[]',
+    reactionsJson: '[]',
+    media: [],
+    links: [],
+  };
+}
+
+export interface LiveHarnessOptions {
+  globalDifferences?: DifferenceResult[];
+  channelDifferences?: Record<string, DifferenceResult[]>;
+  /** History the fake account still holds, for targeted fetches and gap recovery. */
+  messages?: Record<string, TelegramMessage[]>;
+}
+
+/** One selected DM and one selected supergroup, connected through the fake adapter. */
+export function makeLiveHarness(options: LiveHarnessOptions = {}) {
+  const { db, store } = freshArchive();
+  const dialogs = [
+    { peerKey: 'dm:1', kind: 'dm' as const, title: 'Alice', accessHash: '42', selected: true },
+    {
+      peerKey: 'supergroup:2',
+      kind: 'supergroup' as const,
+      title: 'Project',
+      accessHash: '43',
+      selected: true,
+    },
+  ];
+  for (const dialog of dialogs) store.upsertDialog(dialog);
+  const adapter = new FakeTelegramAdapter({
+    dialogs,
+    messages: options.messages ?? { 'dm:1': [], 'supergroup:2': [] },
+    globalDifferences: options.globalDifferences,
+    channelDifferences: options.channelDifferences,
+  });
+  const notifications: string[] = [];
+  const newLive: string[] = [];
+  const root = archiveRoot('live');
+  const deps = {
+    adapter,
+    store,
+    blobs: new TelegramBlobStore(root, () => PLENTY_OF_SPACE),
+    snapshots: new LinkSnapshotter(async () => new Response('', { status: 404 })),
+    notify: async (text: string) => {
+      notifications.push(text);
+    },
+    session: 'session-value',
+    onNewLiveMessage: (peerKey: string, messageId: number) => {
+      newLive.push(`${peerKey}:${messageId}`);
+    },
+  };
+  const manager = new TelegramSyncManager(deps);
+  return { db, store, adapter, deps, manager, root, notifications, newLive };
 }
 
 /** Drives cycles until the lane goes idle, so a test never hangs on a stuck state machine. */

@@ -241,6 +241,17 @@ export class TelegramArchiveStore {
     return row ? mapChatRow(row) : undefined;
   }
 
+  /**
+   * Whether this chat is one Jeon selected. Live and difference events arrive for the whole
+   * account, so this is the gate that keeps unselected chats out of the archive entirely.
+   */
+  isSelected(peerKey: string): boolean {
+    return (
+      this.db.prepare(`SELECT 1 FROM tg_chats WHERE peer_key=? AND selected=1`).get(peerKey) !==
+      undefined
+    );
+  }
+
   /** Carries the access hash so a restarted adapter can address these peers again. */
   listSelectedChats(): TelegramChatRow[] {
     const rows = this.db
@@ -1043,19 +1054,68 @@ export class TelegramArchiveStore {
     return Number(this.db.prepare(sql).run(...params).changes) > 0;
   }
 
+  /**
+   * Records the first observation of a deletion and keeps the content. Telegram omits the peer
+   * for direct messages and basic groups, where message ids are account-wide; supergroup ids
+   * are per-channel, so a peer-less deletion must never reach one.
+   */
   markDeleted(peerKey: string | undefined, messageIds: number[], observedAt: string): void {
     if (messageIds.length === 0) return;
     const placeholders = messageIds.map(() => '?').join(',');
     if (peerKey) {
       this.db
         .prepare(
-          `UPDATE tg_messages SET deleted_at=? WHERE peer_key=? AND message_id IN (${placeholders})`,
+          `UPDATE tg_messages SET deleted_at=?
+           WHERE peer_key=? AND message_id IN (${placeholders}) AND deleted_at IS NULL`,
         )
         .run(observedAt, peerKey, ...messageIds);
     } else {
       this.db
-        .prepare(`UPDATE tg_messages SET deleted_at=? WHERE message_id IN (${placeholders})`)
+        .prepare(
+          `UPDATE tg_messages SET deleted_at=?
+           WHERE message_id IN (${placeholders}) AND deleted_at IS NULL
+             AND peer_key IN (SELECT peer_key FROM tg_chats WHERE kind IN ('dm','group'))`,
+        )
         .run(observedAt, ...messageIds);
+    }
+  }
+
+  /**
+   * Records that a live event referenced a message the archive does not have, so the lane can
+   * fetch it instead of discarding the event. `UNIQUE(kind,item_key)` keeps repeated events
+   * for the same message to a single fetch.
+   */
+  enqueueTargetedFetch(peerKey: string, messageId: number): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO tg_work_items(peer_key,kind,item_key)
+         VALUES(?,'targeted_fetch',?)`,
+      )
+      .run(peerKey, `${peerKey}:${messageId}`);
+  }
+
+  /**
+   * Closes one difference pass. Chats Telegram could not replay keep an explicit gap marker so
+   * `/tg` can show degraded fidelity instead of implying an exact mirror.
+   */
+  markReconciled(
+    peerKeys: readonly string[],
+    at: string,
+    gapPeerKeys: ReadonlySet<string> = new Set(),
+  ): void {
+    if (peerKeys.length === 0) return;
+    this.db.exec('BEGIN');
+    try {
+      const update = this.db.prepare(
+        `UPDATE tg_chats SET last_reconciled_at=?,health_error=?,updated_at=? WHERE peer_key=?`,
+      );
+      for (const peerKey of peerKeys) {
+        update.run(at, gapPeerKeys.has(peerKey) ? 'unresolved_gap' : null, at, peerKey);
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
     }
   }
 
@@ -1130,13 +1190,14 @@ export class TelegramArchiveStore {
     this.writeMessageFts(peerKey, messageId, snapshot.text);
   }
 
-  replaceReactions(peerKey: string, messageId: number, json: string, observedAt: string): void {
+  /** Returns false when the message is unknown, so the caller can fetch it and retry. */
+  replaceReactions(peerKey: string, messageId: number, json: string, observedAt: string): boolean {
     const row = this.db
       .prepare(`SELECT text,entities_json,edited_at FROM tg_messages WHERE peer_key=? AND message_id=?`)
       .get(peerKey, messageId) as unknown as
       | { text: string; entities_json: string; edited_at: string | null }
       | undefined;
-    if (!row) return;
+    if (!row) return false;
     this.applyVersion(
       peerKey,
       messageId,
@@ -1149,14 +1210,16 @@ export class TelegramArchiveStore {
       },
       observedAt,
     );
+    return true;
   }
 
+  /** Returns false when the message is unknown, so the caller can fetch it and retry. */
   replacePoll(
     peerKey: string,
     messageId: number,
     poll: TelegramPollSnapshot,
     observedAt: string,
-  ): void {
+  ): boolean {
     const row = this.db
       .prepare(
         `SELECT text,entities_json,reactions_json,edited_at FROM tg_messages
@@ -1165,7 +1228,7 @@ export class TelegramArchiveStore {
       .get(peerKey, messageId) as unknown as
       | { text: string; entities_json: string; reactions_json: string; edited_at: string | null }
       | undefined;
-    if (!row) return;
+    if (!row) return false;
     this.applyVersion(
       peerKey,
       messageId,
@@ -1178,6 +1241,7 @@ export class TelegramArchiveStore {
       },
       observedAt,
     );
+    return true;
   }
 
   getUpdateState(stateKey: string): string | undefined {

@@ -560,7 +560,14 @@ test('fake adapter paginates, clones, and downloads media without network', asyn
   assert.deepEqual(fake.downloads, ['dm:1:1:photo:1']);
   await assert.rejects(() => fake.downloadMedia('dm:1', 1, 'missing', output), /fake media missing/);
 
+  // With no persisted position there is nothing to replay, only a position to seed.
   assert.deepEqual(await fake.getGlobalDifference(undefined), {
+    events: [],
+    globalState: '{"pts":1}',
+    complete: true,
+    gap: false,
+  });
+  assert.deepEqual(await fake.getGlobalDifference('{"pts":1}'), {
     events: [],
     globalState: '{"pts":2}',
     complete: true,
@@ -573,9 +580,16 @@ test('fake adapter paginates, clones, and downloads media without network', asyn
   });
   assert.deepEqual(await fake.getChannelDifference('supergroup:2', undefined), {
     events: [],
+    channelState: '{"pts":1}',
     complete: true,
     gap: false,
   });
+  assert.deepEqual(fake.differenceRequests, [
+    'global',
+    'global',
+    'global',
+    'channel:supergroup:2',
+  ]);
 });
 
 test('fake adapter notifies connection and event consumers with cloned payloads', async () => {

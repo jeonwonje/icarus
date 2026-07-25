@@ -879,8 +879,14 @@ export class GramJsTelegramAdapter implements TelegramAdapter {
   };
 
   readonly #handleDelete = async (event: DeletedMessageEvent): Promise<void> => {
+    // Telegram only says where a deletion happened for channels. Everywhere else the event is
+    // peer-less by protocol, and the store resolves it from account-wide message ids.
     const peerKey =
-      event.peer instanceof Api.PeerChannel ? peerKeyFromPeer(event.peer) : undefined;
+      event.peer instanceof Api.PeerChannel ||
+      event.peer instanceof Api.PeerChat ||
+      event.peer instanceof Api.PeerUser
+        ? peerKeyFromPeer(event.peer)
+        : undefined;
     await this.#dispatch({
       type: 'delete',
       peerKey,
