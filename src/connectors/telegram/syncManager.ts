@@ -45,6 +45,12 @@ const STORAGE_CODES = new Set(['ENOSPC', 'EACCES', 'EPERM', 'EROFS', 'EIO', 'EDQ
 /** Raised for archive-volume faults so they pause the item instead of burning retries. */
 class StorageFault extends Error {}
 
+/**
+ * Raised when a link fetch never reached a server. The page has said nothing about itself, so
+ * this must back off like any other transient fault instead of becoming a verdict.
+ */
+class LinkTransportFault extends Error {}
+
 type FailureKind = 'flood' | 'transient' | 'permanent' | 'storage';
 
 interface Classified {
@@ -72,6 +78,8 @@ export function classifyFailure(error: unknown): Classified {
   if (error instanceof StorageFault) return { kind: 'storage', message };
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
   if (typeof code === 'string' && STORAGE_CODES.has(code)) return { kind: 'storage', message };
+  // A transport fault carries the network's own wording, which may happen to look permanent.
+  if (error instanceof LinkTransportFault) return { kind: 'transient', message };
   if (PERMANENT.test(message)) return { kind: 'permanent', message };
   return { kind: 'transient', message };
 }
@@ -95,11 +103,32 @@ export class TelegramSyncManager {
   private loop: Promise<void> | undefined;
   private timer: NodeJS.Timeout | undefined;
   private wake: (() => void) | undefined;
+  /** Serializes cycles: concurrent callers queue behind the one already in flight. */
+  private cycles: Promise<unknown> = Promise.resolve();
   private readonly alerted = new Set<string>();
 
-  constructor(private readonly deps: TelegramSyncDeps) {}
+  constructor(private readonly deps: TelegramSyncDeps) {
+    this.recover();
+  }
+
+  /**
+   * Clears what a crash left behind: work items still claimed by a process that no longer
+   * exists, and the part files their downloads had started writing.
+   */
+  recover(): void {
+    const requeued = this.deps.store.recoverInterruptedWork();
+    const swept = this.deps.blobs.sweepTempDir();
+    if (requeued > 0 || swept > 0) {
+      log.info({ requeued, swept }, 'telegram sync recovered interrupted acquisition work');
+    }
+  }
 
   async startImport(peerKey: string): Promise<void> {
+    const active = this.deps.store.getImport(peerKey);
+    if (active?.state === 'scanning' || active?.state === 'acquiring') {
+      // Restarting would reset the cursor and counters and re-walk history from the top.
+      throw new Error(`telegram import already running: ${peerKey}`);
+    }
     await this.ensureSelectedChat(peerKey);
     this.primePeers();
     const total = await this.deps.adapter.countMessages(peerKey);
@@ -145,8 +174,18 @@ export class TelegramSyncManager {
     this.loop = undefined;
   }
 
-  /** Returns whether the cycle advanced anything, which is what paces the outer loop. */
-  async runOneCycle(): Promise<boolean> {
+  /**
+   * Returns whether the cycle advanced anything, which is what paces the outer loop. Cycles
+   * are single-flight: claiming a history page is not atomic, so overlapping callers would
+   * otherwise both read the same cursor and fetch the same page.
+   */
+  runOneCycle(): Promise<boolean> {
+    const next = this.cycles.then(() => this.cycle());
+    this.cycles = next.catch(() => undefined);
+    return next;
+  }
+
+  private async cycle(): Promise<boolean> {
     const at = this.nowIso();
     this.primePeers();
     if (this.deps.blobs.hasFreeSpace(MIN_FREE_BYTES) && this.deps.store.resumeLowDiskWork(at) > 0) {
@@ -206,10 +245,9 @@ export class TelegramSyncManager {
       this.deps.store.clearImportRetry(job.peerKey);
       this.setImportAttempts(job.peerKey, 0);
       // Telegram's total counts service messages the adapter drops, so an exhausted cursor —
-      // never a message count — is what ends the walk.
-      if (page.nextBeforeMessageId === null) {
-        this.deps.store.setImportState(job.peerKey, 'acquiring');
-      }
+      // never a message count — is what ends the walk. The transition is guarded because an
+      // operator may have paused or cancelled while this page was still in flight.
+      if (page.nextBeforeMessageId === null) this.deps.store.finishScan(job.peerKey);
     } catch (error) {
       await this.recordImportFailure(job.peerKey, error, at);
     }
@@ -231,7 +269,9 @@ export class TelegramSyncManager {
       }
     }
     this.setImportAttempts(peerKey, 0);
-    this.deps.store.setImportState(peerKey, 'error', failure.message);
+    // A pause or cancel issued while the page was in flight owns the job now; do not park it
+    // on an error the operator has already overtaken, and do not raise a DM about it.
+    if (!this.deps.store.failImport(peerKey, failure.message)) return;
     const title = this.deps.store.getChat(peerKey)?.title ?? peerKey;
     await this.alert(
       `import-error:${peerKey}`,
@@ -322,9 +362,14 @@ export class TelegramSyncManager {
       return;
     }
     const result = await this.deps.snapshots.snapshot(target.url);
+    if (result.status === 'unavailable' && result.reason === 'transport') {
+      // The request never reached a server, so this is the lane's failure to retry, not a
+      // verdict about the page.
+      throw new LinkTransportFault(result.error);
+    }
     if (result.status !== 'complete') {
-      // An unreachable page is the link's own permanent state, not a lane failure, and by
-      // design it never raises a DM.
+      // A refusal or an unusable body is the link's own permanent state, not a lane failure,
+      // and by design it never raises a DM.
       this.deps.store.completeLinkWork({
         workItemId: item.id,
         linkId: target.id,
@@ -386,6 +431,16 @@ export class TelegramSyncManager {
         error: failure.message,
         disposition,
         retryAt,
+      });
+    } else if (item.kind === 'link') {
+      this.deps.store.recordLinkFailure({
+        workItemId: item.id,
+        peerKey: item.peerKey,
+        itemKey: item.itemKey,
+        error: failure.message,
+        disposition,
+        retryAt,
+        at,
       });
     } else if (disposition === 'flood' && retryAt) {
       this.deps.store.deferWorkItem(item.id, failure.message, retryAt);

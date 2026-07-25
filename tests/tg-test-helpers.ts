@@ -87,7 +87,7 @@ export function makeMediaHarness(options: WorkHarnessOptions = {}) {
   const root = archiveRoot('work');
   const freeBytes = options.freeBytes ?? PLENTY_OF_SPACE;
   const notifications: string[] = [];
-  const manager = new TelegramSyncManager({
+  const deps = {
     adapter,
     store,
     blobs: new TelegramBlobStore(
@@ -101,8 +101,9 @@ export function makeMediaHarness(options: WorkHarnessOptions = {}) {
       notifications.push(text);
     },
     clock: options.clock,
-  });
-  return { manager, db, store, adapter, root, notifications };
+  };
+  const manager = new TelegramSyncManager(deps);
+  return { manager, deps, db, store, adapter, root, notifications };
 }
 
 /** Drives cycles until the lane goes idle, so a test never hangs on a stuck state machine. */

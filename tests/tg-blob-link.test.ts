@@ -43,6 +43,35 @@ test('blob store removes media and link snapshot forms by hash', async () => {
   assert.equal(existsSync(bareLink.path), false);
 });
 
+test('blob store sweeps part files a crash left in the temp directory', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'icarus-tg-sweep-'));
+  const store = new TelegramBlobStore(path.join(root, 'archive'));
+  const orphan = path.join(store.tempDir(), 'work-7.part');
+  writeFileSync(orphan, 'half a photo');
+  assert.equal(store.sweepTempDir(), 1);
+  assert.equal(existsSync(orphan), false);
+  assert.equal(existsSync(store.tempDir()), true);
+});
+
+test('link snapshot distinguishes transport faults from HTTP and content verdicts', async () => {
+  const transport = new LinkSnapshotter(async () => {
+    throw new Error('network unreachable');
+  });
+  const thrown = await transport.snapshot('https://example.com/a');
+  assert.equal(thrown.status, 'unavailable');
+  assert.equal(thrown.status === 'unavailable' && thrown.reason, 'transport');
+
+  const http = new LinkSnapshotter(async () => new Response('nope', { status: 503 }));
+  const refused = await http.snapshot('https://example.com/a');
+  assert.equal(refused.status === 'unavailable' && refused.reason, 'http');
+
+  const binary = new LinkSnapshotter(
+    async () => new Response('binary', { headers: { 'content-type': 'image/png' } }),
+  );
+  const rejected = await binary.snapshot('https://example.com/a');
+  assert.equal(rejected.status === 'unavailable' && rejected.reason, 'content');
+});
+
 test('link snapshot enforces text normalization and response limits', async () => {
   const fetcher: typeof fetch = async () =>
     new Response('<html><body><h1>Title</h1><script>bad()</script><p>Body</p></body></html>', {

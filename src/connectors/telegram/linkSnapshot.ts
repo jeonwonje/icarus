@@ -9,6 +9,12 @@ const ACCEPTED_MEDIA_TYPES = new Set([
   'application/xhtml+xml',
 ]);
 
+/**
+ * Why a snapshot failed. `transport` means the request never produced a response, which can
+ * succeed later; `http` and `content` are verdicts about the page itself, which will not.
+ */
+export type LinkUnavailableReason = 'transport' | 'http' | 'content';
+
 export type LinkSnapshotResult =
   | {
       status: 'complete';
@@ -17,7 +23,12 @@ export type LinkSnapshotResult =
       response: Record<string, string | number>;
       text: string;
     }
-  | { status: 'unavailable'; finalUrl?: string; error: string };
+  | {
+      status: 'unavailable';
+      reason: LinkUnavailableReason;
+      finalUrl?: string;
+      error: string;
+    };
 
 const readBoundedBody = async (response: Response): Promise<Uint8Array | undefined> => {
   if (!response.body) return new Uint8Array();
@@ -69,21 +80,43 @@ export class LinkSnapshotter {
       const finalUrl = response.url || url;
       if (!response.ok) {
         await cancelBody(response);
-        return { status: 'unavailable', finalUrl, error: `HTTP ${response.status}` };
+        return {
+          status: 'unavailable',
+          reason: 'http',
+          finalUrl,
+          error: `HTTP ${response.status}`,
+        };
       }
       const declared = Number(response.headers.get('content-length') ?? '0');
       if (declared > MAX_BODY) {
         await cancelBody(response);
-        return { status: 'unavailable', finalUrl, error: 'response exceeds 5 MB' };
+        return {
+          status: 'unavailable',
+          reason: 'content',
+          finalUrl,
+          error: 'response exceeds 5 MB',
+        };
       }
       const contentType = response.headers.get('content-type') ?? '';
       const mediaType = contentType.split(';', 1)[0].trim().toLowerCase();
       if (!mediaType.startsWith('text/') && !ACCEPTED_MEDIA_TYPES.has(mediaType)) {
         await cancelBody(response);
-        return { status: 'unavailable', finalUrl, error: `unsupported ${contentType}` };
+        return {
+          status: 'unavailable',
+          reason: 'content',
+          finalUrl,
+          error: `unsupported ${contentType}`,
+        };
       }
       const bytes = await readBoundedBody(response);
-      if (!bytes) return { status: 'unavailable', finalUrl, error: 'response exceeds 5 MB' };
+      if (!bytes) {
+        return {
+          status: 'unavailable',
+          reason: 'content',
+          finalUrl,
+          error: 'response exceeds 5 MB',
+        };
+      }
       const raw = new TextDecoder().decode(bytes);
       const text = mediaType === 'text/html' || mediaType === 'application/xhtml+xml'
         ? convert(raw, {
@@ -102,7 +135,9 @@ export class LinkSnapshotter {
         text: text.replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT),
       };
     } catch (error) {
-      return { status: 'unavailable', error: String(error).slice(0, 500) };
+      // A timeout, DNS miss, or reset connection says nothing about the page, so the caller
+      // must be free to retry it rather than record it as gone.
+      return { status: 'unavailable', reason: 'transport', error: String(error).slice(0, 500) };
     }
   }
 }

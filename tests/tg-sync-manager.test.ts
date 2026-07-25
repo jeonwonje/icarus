@@ -1,7 +1,7 @@
 import './env.js';
 
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { TelegramBlobStore } from '../src/connectors/telegram/blobStore.js';
@@ -348,6 +348,160 @@ test('retry re-queues failed work items and clears their media failure', async (
     'pending',
   );
   assert.equal(store.getImport('dm:1')?.state, 'acquiring');
+});
+
+test('a crash mid-item is recovered by the next manager and the import completes', async () => {
+  const { deps, db, store, root } = makeMediaHarness({ acquiring: true, clock: fixedClock });
+  // A claimed item with no process behind it is exactly what a crash leaves in the queue,
+  // along with the part file its download had already started writing.
+  const claimed = store.claimWorkItem(FIXED);
+  assert.equal(claimed?.state, 'in_progress');
+  writeFileSync(path.join(root, 'tmp', `work-${claimed?.id}.part`), 'half a photo');
+
+  const restarted = new TelegramSyncManager(deps);
+  assert.deepEqual(readdirSync(path.join(root, 'tmp')), []);
+  assert.equal(
+    (db.prepare(`SELECT state FROM tg_work_items`).get() as unknown as { state: string }).state,
+    'pending',
+  );
+  await drain(restarted);
+  assert.equal(
+    (db.prepare(`SELECT state FROM tg_work_items`).get() as unknown as { state: string }).state,
+    'done',
+  );
+  assert.equal(store.getImport('dm:1')?.state, 'complete');
+});
+
+test('retry also recovers work items stranded in progress', async () => {
+  const { manager, db, store } = makeMediaHarness({ acquiring: true, clock: fixedClock });
+  store.claimWorkItem(FIXED);
+  assert.equal(manager.retry('dm:1'), true);
+  assert.equal(
+    (db.prepare(`SELECT state FROM tg_work_items`).get() as unknown as { state: string }).state,
+    'pending',
+  );
+});
+
+test('pausing during an in-flight history page is not overwritten by the scan', async () => {
+  // A single page ends the walk, so the scan would otherwise force the job into 'acquiring'.
+  const { store, adapter, deps } = makeHistoryHarness({ pageSize: 10 });
+  const manager = new TelegramSyncManager(deps);
+  await manager.startImport('dm:1');
+  const fetchPage = adapter.fetchHistoryPage.bind(adapter);
+  adapter.fetchHistoryPage = async (peerKey, before, limit) => {
+    const page = await fetchPage(peerKey, before, limit);
+    manager.pause('dm:1');
+    return page;
+  };
+  await manager.runOneCycle();
+  assert.equal(store.getImport('dm:1')?.state, 'paused');
+  assert.equal(await manager.runOneCycle(), false);
+});
+
+test('cancelling during an in-flight history page stops acquisition', async () => {
+  const { db, store, adapter, deps } = makeHistoryHarness({ pageSize: 10 });
+  const manager = new TelegramSyncManager(deps);
+  await manager.startImport('dm:1');
+  const fetchPage = adapter.fetchHistoryPage.bind(adapter);
+  adapter.fetchHistoryPage = async (peerKey, before, limit) => {
+    const page = await fetchPage(peerKey, before, limit);
+    manager.cancel('dm:1');
+    return page;
+  };
+  await manager.runOneCycle();
+  assert.equal(store.getImport('dm:1')?.state, 'cancelled');
+  assert.equal(await manager.runOneCycle(), false);
+  // Cancel keeps what was already fetched; it only stops future work.
+  assert.equal(messageCount(db), 5);
+});
+
+test('a link transport failure backs off and only then fails permanently', async () => {
+  let at = Date.parse(FIXED);
+  const { manager, db } = makeMediaHarness({
+    acquiring: true,
+    media: [],
+    links: [{ url: 'https://example.com/a' }],
+    fetcher: async () => {
+      throw new Error('network unreachable');
+    },
+    clock: () => new Date(at),
+  });
+  const workItem = () =>
+    db.prepare(`SELECT state,attempts,next_retry_at FROM tg_work_items`).get() as unknown as {
+      state: string;
+      attempts: number;
+      next_retry_at: string;
+    };
+  const link = () =>
+    db.prepare(`SELECT status,error FROM tg_links`).get() as unknown as {
+      status: string;
+      error: string;
+    };
+  for (const [attempt, delay] of [30_000, 120_000, 600_000].entries()) {
+    await manager.runOneCycle();
+    assert.deepEqual(
+      { ...workItem() },
+      { state: 'pending', attempts: attempt + 1, next_retry_at: new Date(at + delay).toISOString() },
+    );
+    // A link still owed a retry must not be advertised as unavailable.
+    assert.equal(link().status, 'pending');
+    at += delay;
+  }
+  await manager.runOneCycle();
+  assert.equal(workItem().state, 'failed');
+  assert.equal(link().status, 'unavailable');
+  assert.match(link().error, /network unreachable/);
+  assert.equal(
+    (db.prepare(`SELECT failed_links AS n FROM tg_import_jobs`).get() as unknown as { n: number }).n,
+    1,
+  );
+});
+
+test('an HTTP-unavailable link stays permanent and never burns a retry', async () => {
+  const { manager, db } = makeMediaHarness({
+    acquiring: true,
+    media: [],
+    links: [{ url: 'https://example.com/gone' }],
+    fetcher: async () => new Response('nope', { status: 410 }),
+    clock: fixedClock,
+  });
+  assert.equal(await manager.runOneCycle(), true);
+  const item = db.prepare(`SELECT state,attempts FROM tg_work_items`).get() as unknown as {
+    state: string;
+    attempts: number;
+  };
+  assert.deepEqual({ ...item }, { state: 'done', attempts: 0 });
+  assert.equal(
+    (db.prepare(`SELECT status FROM tg_links`).get() as unknown as { status: string }).status,
+    'unavailable',
+  );
+});
+
+test('starting an import that is already running is rejected and keeps progress', async () => {
+  const { db, store, deps } = makeHistoryHarness();
+  const manager = new TelegramSyncManager(deps);
+  await manager.startImport('dm:1');
+  await manager.runOneCycle();
+  await assert.rejects(() => manager.startImport('dm:1'), /already/i);
+  assert.equal(store.getImport('dm:1')?.importedMessages, 2);
+  assert.equal(store.getImport('dm:1')?.oldestMessageId, 4);
+  assert.equal(messageCount(db), 2);
+});
+
+test('concurrent cycles serialize instead of double-fetching the same page', async () => {
+  const { db, deps, adapter } = makeHistoryHarness();
+  const manager = new TelegramSyncManager(deps);
+  await manager.startImport('dm:1');
+  const cursors: (number | null)[] = [];
+  const fetchPage = adapter.fetchHistoryPage.bind(adapter);
+  adapter.fetchHistoryPage = async (peerKey, before, limit) => {
+    cursors.push(before);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return fetchPage(peerKey, before, limit);
+  };
+  await Promise.all([manager.runOneCycle(), manager.runOneCycle()]);
+  assert.deepEqual(cursors, [null, 4]);
+  assert.equal(messageCount(db), 4);
 });
 
 test('start and stop run the lane without leaving a cycle in flight', async () => {

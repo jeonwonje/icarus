@@ -468,11 +468,35 @@ export class TelegramArchiveStore {
       .run(state, error ?? null, state, ts, ts, peerKey);
   }
 
+  /**
+   * Ends the history walk. Guarded on `scanning` so a pause or cancel the operator issued
+   * while the last page was in flight is not overwritten by the page that lands after it.
+   */
+  finishScan(peerKey: string): boolean {
+    return this.changed(
+      `UPDATE tg_import_jobs SET state='acquiring',updated_at=? WHERE peer_key=? AND state='scanning'`,
+      now(),
+      peerKey,
+    );
+  }
+
+  /** Parks an import on an error, unless the operator has since taken it out of the lane. */
+  failImport(peerKey: string, error: string): boolean {
+    return this.changed(
+      `UPDATE tg_import_jobs SET state='error',last_error=?,updated_at=?
+       WHERE peer_key=? AND state IN ('scanning','acquiring')`,
+      error,
+      now(),
+      peerKey,
+    );
+  }
+
   /** Records a retry without changing the phase, so the cursor survives the wait. */
   deferImport(peerKey: string, error: string, retryAt: string): void {
     this.db
       .prepare(
-        `UPDATE tg_import_jobs SET next_retry_at=?,last_error=?,updated_at=? WHERE peer_key=?`,
+        `UPDATE tg_import_jobs SET next_retry_at=?,last_error=?,updated_at=?
+         WHERE peer_key=? AND state IN ('scanning','acquiring')`,
       )
       .run(retryAt, error, now(), peerKey);
   }
@@ -521,14 +545,25 @@ export class TelegramArchiveStore {
     );
   }
 
-  /** Re-queues this chat's failed and paused acquisition work with a fresh retry budget. */
+  /**
+   * Re-queues this chat's stalled acquisition work with a fresh retry budget. `in_progress`
+   * is included because a claim only survives the process that made it.
+   */
   retryFailedWork(peerKey: string): number {
     this.db.exec('BEGIN');
     try {
+      const linkKeys = (
+        this.db
+          .prepare(
+            `SELECT item_key FROM tg_work_items
+             WHERE peer_key=? AND kind='link' AND state IN ('failed','paused','in_progress')`,
+          )
+          .all(peerKey) as unknown as { item_key: string }[]
+      ).map((row) => row.item_key);
       const result = this.db
         .prepare(
           `UPDATE tg_work_items SET state='pending',attempts=0,next_retry_at=NULL,last_error=NULL
-           WHERE peer_key=? AND state IN ('failed','paused')`,
+           WHERE peer_key=? AND state IN ('failed','paused','in_progress')`,
         )
         .run(peerKey);
       this.db
@@ -537,6 +572,16 @@ export class TelegramArchiveStore {
            WHERE peer_key=? AND status IN ('failed','paused')`,
         )
         .run(peerKey);
+      if (linkKeys.length > 0) {
+        this.db
+          .prepare(
+            `UPDATE tg_links SET status='pending',error=NULL,fetched_at=NULL
+             WHERE peer_key=? AND status='unavailable'
+               AND (peer_key || ':' || message_id || ':' || normalized_url)
+                   IN (${linkKeys.map(() => '?').join(',')})`,
+          )
+          .run(peerKey, ...linkKeys);
+      }
       const requeued = Number(result.changes);
       // A finished import that owes work again is not finished; reopen it so the lane can
       // complete it a second time once the queue drains.
@@ -606,6 +651,18 @@ export class TelegramArchiveStore {
     `,
       )
       .run(at, at);
+  }
+
+  /**
+   * Returns work a crash left claimed to the queue. Nothing outlives the process that
+   * claimed it, so an `in_progress` row on startup is by definition abandoned. Attempts are
+   * kept so an item that keeps taking the process down still exhausts its budget.
+   */
+  recoverInterruptedWork(): number {
+    const result = this.db
+      .prepare(`UPDATE tg_work_items SET state='pending',next_retry_at=NULL WHERE state='in_progress'`)
+      .run();
+    return Number(result.changes);
   }
 
   claimWorkItem(at: string): TelegramWorkItem | undefined {
@@ -881,6 +938,49 @@ export class TelegramArchiveStore {
             `UPDATE tg_import_jobs SET failed_links=failed_links+1,updated_at=? WHERE peer_key=?`,
           )
           .run(now(), input.peerKey);
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /**
+   * Keeps a link's queue entry and its row on the same verdict. A retry still owed leaves the
+   * link `pending`; an exhausted budget marks it unavailable so the queue never holds a failed
+   * item over a link the archive still advertises as being on its way.
+   */
+  recordLinkFailure(input: {
+    workItemId: number;
+    peerKey: string;
+    itemKey: string;
+    error: string;
+    disposition: 'flood' | 'backoff' | 'storage' | 'failed';
+    retryAt?: string;
+    at: string;
+  }): void {
+    this.db.exec('BEGIN');
+    try {
+      if (input.disposition === 'flood' && input.retryAt) {
+        this.deferWorkItem(input.workItemId, input.error, input.retryAt);
+      } else if (input.disposition === 'storage') {
+        this.pauseWorkItem(input.workItemId, input.error);
+      } else if (input.disposition !== 'failed') {
+        this.failWorkItem(input.workItemId, input.error, input.retryAt);
+      } else {
+        this.failWorkItem(input.workItemId, input.error);
+        const link = this.getLinkTarget(input.peerKey, input.itemKey);
+        if (link?.status === 'pending') {
+          this.db
+            .prepare(`UPDATE tg_links SET status='unavailable',error=?,fetched_at=? WHERE id=?`)
+            .run(input.error, input.at, link.id);
+          this.db
+            .prepare(
+              `UPDATE tg_import_jobs SET failed_links=failed_links+1,updated_at=? WHERE peer_key=?`,
+            )
+            .run(now(), input.peerKey);
+        }
       }
       this.db.exec('COMMIT');
     } catch (error) {

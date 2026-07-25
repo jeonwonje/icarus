@@ -58,6 +58,19 @@ export class TelegramBlobStore {
     return this.freeBytes(this.root) >= minimumBytes;
   }
 
+  /**
+   * Drops part files from interrupted downloads. Nothing in the temp directory is ever read
+   * back after the process that wrote it is gone, so a restart can always start it clean.
+   */
+  sweepTempDir(): number {
+    let removed = 0;
+    for (const entry of readdirSync(this.tempDir())) {
+      rmSync(path.join(this.tempDir(), entry), { force: true, recursive: true });
+      removed += 1;
+    }
+    return removed;
+  }
+
   async putFile(tempPath: string): Promise<StoredBlob> {
     const hash = await hashFile(tempPath);
     const destination = path.join(this.root, 'blobs', 'sha256', hash.slice(0, 2), hash);
