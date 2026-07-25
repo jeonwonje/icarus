@@ -90,29 +90,167 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (source, item_id)
   );
   `,
+  `
+  CREATE TABLE tg_chats (
+    peer_key TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('dm','group','supergroup')),
+    title TEXT NOT NULL,
+    username TEXT,
+    access_hash TEXT,
+    selected INTEGER NOT NULL DEFAULT 0,
+    last_live_at TEXT,
+    last_reconciled_at TEXT,
+    health_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE tg_participants (
+    peer_key TEXT NOT NULL REFERENCES tg_chats(peer_key) ON DELETE CASCADE,
+    participant_key TEXT NOT NULL,
+    display_name TEXT,
+    username TEXT,
+    observed_at TEXT NOT NULL,
+    PRIMARY KEY(peer_key, participant_key)
+  );
+  CREATE TABLE tg_messages (
+    peer_key TEXT NOT NULL REFERENCES tg_chats(peer_key) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL,
+    sender_key TEXT,
+    sender_name TEXT,
+    sent_at TEXT NOT NULL,
+    edited_at TEXT,
+    deleted_at TEXT,
+    reply_to_message_id INTEGER,
+    grouped_id TEXT,
+    text TEXT NOT NULL DEFAULT '',
+    entities_json TEXT NOT NULL DEFAULT '[]',
+    reactions_json TEXT NOT NULL DEFAULT '[]',
+    content_hash TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    triage_pending INTEGER NOT NULL DEFAULT 0,
+    triaged_at TEXT,
+    PRIMARY KEY(peer_key, message_id)
+  );
+  CREATE INDEX idx_tg_messages_sender ON tg_messages(peer_key, sender_key, sent_at);
+  CREATE INDEX idx_tg_messages_untriaged
+    ON tg_messages(peer_key, triage_pending, triaged_at, message_id);
+  CREATE TABLE tg_message_versions (
+    peer_key TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    version_hash TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    edited_at TEXT,
+    text TEXT NOT NULL,
+    entities_json TEXT NOT NULL,
+    reactions_json TEXT NOT NULL,
+    poll_json TEXT,
+    PRIMARY KEY(peer_key, message_id, version_hash),
+    FOREIGN KEY(peer_key, message_id) REFERENCES tg_messages(peer_key, message_id) ON DELETE CASCADE
+  );
+  CREATE TABLE tg_media (
+    media_key TEXT PRIMARY KEY,
+    peer_key TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    filename TEXT,
+    mime_type TEXT,
+    expected_size INTEGER,
+    descriptor_json TEXT NOT NULL,
+    blob_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    bytes INTEGER,
+    error TEXT,
+    retry_at TEXT,
+    FOREIGN KEY(peer_key, message_id) REFERENCES tg_messages(peer_key, message_id) ON DELETE CASCADE
+  );
+  CREATE INDEX idx_tg_media_status ON tg_media(status, retry_at);
+  CREATE TABLE tg_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_key TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    original_url TEXT NOT NULL,
+    normalized_url TEXT NOT NULL,
+    preview_json TEXT,
+    final_url TEXT,
+    response_json TEXT,
+    snapshot_hash TEXT,
+    extracted_text TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT,
+    fetched_at TEXT,
+    UNIQUE(peer_key, message_id, original_url),
+    FOREIGN KEY(peer_key, message_id) REFERENCES tg_messages(peer_key, message_id) ON DELETE CASCADE
+  );
+  CREATE INDEX idx_tg_links_status ON tg_links(status);
+  CREATE TABLE tg_import_jobs (
+    peer_key TEXT PRIMARY KEY REFERENCES tg_chats(peer_key) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    total_messages INTEGER,
+    imported_messages INTEGER NOT NULL DEFAULT 0,
+    oldest_message_id INTEGER,
+    discovered_media_bytes INTEGER NOT NULL DEFAULT 0,
+    downloaded_media_bytes INTEGER NOT NULL DEFAULT 0,
+    failed_media INTEGER NOT NULL DEFAULT 0,
+    failed_links INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TEXT,
+    last_error TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE tg_work_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_key TEXT NOT NULL REFERENCES tg_chats(peer_key) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('media','link','targeted_fetch')),
+    item_key TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TEXT,
+    last_error TEXT,
+    UNIQUE(kind, item_key)
+  );
+  CREATE INDEX idx_tg_work_claim ON tg_work_items(state, next_retry_at, id);
+  CREATE TABLE tg_update_state (
+    state_key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    verified_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE VIRTUAL TABLE tg_message_fts USING fts5(
+    peer_key UNINDEXED,
+    message_id UNINDEXED,
+    text,
+    link_text,
+    tokenize='unicode61'
+  );
+  `,
 ];
 
 export let db: DatabaseSync;
+
+export function migrateDb(target: DatabaseSync): void {
+  target.exec('PRAGMA foreign_keys=ON');
+  const { user_version: version } = target.prepare('PRAGMA user_version').get() as {
+    user_version: number;
+  };
+  for (let v = version; v < MIGRATIONS.length; v++) {
+    target.exec('BEGIN');
+    try {
+      target.exec(MIGRATIONS[v]);
+      target.exec(`PRAGMA user_version=${v + 1}`);
+      target.exec('COMMIT');
+    } catch (error) {
+      target.exec('ROLLBACK');
+      throw error;
+    }
+  }
+}
 
 export function openDb(): DatabaseSync {
   mkdirSync(path.dirname(cfg.dbPath), { recursive: true });
   db = new DatabaseSync(cfg.dbPath);
   db.exec('PRAGMA journal_mode=WAL');
-  db.exec('PRAGMA foreign_keys=ON');
-  const { user_version: version } = db
-    .prepare('PRAGMA user_version')
-    .get() as { user_version: number };
-  for (let v = version; v < MIGRATIONS.length; v++) {
-    db.exec('BEGIN');
-    try {
-      db.exec(MIGRATIONS[v]);
-      db.exec(`PRAGMA user_version=${v + 1}`);
-      db.exec('COMMIT');
-    } catch (e) {
-      db.exec('ROLLBACK');
-      throw e;
-    }
-  }
+  migrateDb(db);
   return db;
 }
 
