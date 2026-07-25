@@ -1276,6 +1276,23 @@ export class TelegramArchiveStore {
     return row.n > 0 ? { fromId: row.fromId as number, throughId: row.throughId as number } : undefined;
   }
 
+  /**
+   * Through-id of the oldest `limit` untriaged messages. Use this to cap a triage batch so
+   * `markTriagedThrough` cannot clear ids that never entered the prompt window.
+   */
+  capUntriagedThrough(peerKey: string, limit: number): number | undefined {
+    if (limit <= 0) return undefined;
+    const rows = this.db
+      .prepare(
+        `SELECT message_id AS id FROM tg_messages
+         WHERE peer_key=? AND triage_pending=1
+         ORDER BY message_id ASC
+         LIMIT ?`,
+      )
+      .all(peerKey, limit) as unknown as { id: number }[];
+    return rows.length > 0 ? rows[rows.length - 1]!.id : undefined;
+  }
+
   loadTriageWindow(peerKey: string, throughId: number, limit: number): TelegramMessageRow[] {
     const rows = this.db
       .prepare(

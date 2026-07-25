@@ -9,10 +9,8 @@ import type {
 
 const DEFAULT_QUIET_MS = 5 * 60_000;
 const FLUSH_INTERVAL_MS = 30_000;
-/** Matches the legacy telegramUser MAX_BATCH burst cap. */
+/** Matches the legacy telegramUser MAX_BATCH burst cap; also the triage prompt window size. */
 const MAX_BATCH = 50;
-/** Must be >= MAX_BATCH so a flushed burst cannot be marked triaged without appearing in the prompt. */
-const TRIAGE_WINDOW = MAX_BATCH;
 
 const chatJobKey = (peerKey: string): string => peerKey.replace(/[^a-z0-9-]/gi, '-');
 
@@ -95,14 +93,13 @@ export class TelegramTriageBridge {
     const prev = this.due.get(peerKey);
     const pendingCount = (prev?.pendingCount ?? 0) + 1;
     this.due.set(peerKey, { lastAt: Date.now(), dirty: true, pendingCount });
-    const maxBatch = this.deps.maxBatch ?? MAX_BATCH;
-    if (pendingCount >= maxBatch) void this.flushDue();
+    if (pendingCount >= this.batchLimit()) void this.flushDue();
   }
 
   /** Polls due chats. A 30-second timer calls this while the bridge is started. */
   async flushDue(nowMs = Date.now()): Promise<void> {
     const quietMs = this.deps.quietMs ?? DEFAULT_QUIET_MS;
-    const maxBatch = this.deps.maxBatch ?? MAX_BATCH;
+    const maxBatch = this.batchLimit();
     for (const [peerKey, state] of this.due) {
       if (this.inFlight.has(peerKey)) continue;
       const quietElapsed = nowMs - state.lastAt >= quietMs;
@@ -113,7 +110,7 @@ export class TelegramTriageBridge {
         this.due.delete(peerKey);
         continue;
       }
-      this.submit(peerKey, range.throughId);
+      this.submit(peerKey);
     }
   }
 
@@ -129,11 +126,25 @@ export class TelegramTriageBridge {
     this.timer = undefined;
   }
 
-  private submit(peerKey: string, throughId: number): void {
+  /** Burst cap and prompt window share one limit (deps.maxBatch or MAX_BATCH). */
+  private batchLimit(): number {
+    return this.deps.maxBatch ?? MAX_BATCH;
+  }
+
+  private submit(peerKey: string): void {
+    const window = this.batchLimit();
+    // Cap to the oldest `window` pending ids so markTriagedThrough cannot clear a span
+    // larger than what loadTriageWindow actually puts in the prompt (restart/backlog).
+    const cappedThrough = this.deps.store.capUntriagedThrough(peerKey, window);
+    if (cappedThrough === undefined) {
+      this.due.delete(peerKey);
+      return;
+    }
     this.inFlight.add(peerKey);
     this.due.set(peerKey, { lastAt: Date.now(), dirty: false, pendingCount: 0 });
     const chat = this.deps.store.getChat(peerKey)!;
-    const rows = this.deps.store.loadTriageWindow(peerKey, throughId, TRIAGE_WINDOW);
+    const rows = this.deps.store.loadTriageWindow(peerKey, cappedThrough, window);
+    const throughId = rows.length > 0 ? rows[rows.length - 1]!.messageId : cappedThrough;
     this.deps.submit({
       jid: `job:tg-triage:${chatJobKey(peerKey)}`,
       kind: 'job:tg-triage',
@@ -145,6 +156,15 @@ export class TelegramTriageBridge {
         if (result.status === 'ok') {
           this.deps.store.markTriagedThrough(peerKey, throughId, new Date().toISOString());
           if (result.finalText.trim()) void this.deps.sendOwner(result.finalText);
+          // Leftover untriaged (batch was capped) must stay pending and flush again.
+          if (this.deps.store.getUntriagedRange(peerKey)) {
+            const prev = this.due.get(peerKey);
+            this.due.set(peerKey, {
+              lastAt: prev?.lastAt ?? Date.now(),
+              dirty: true,
+              pendingCount: Math.max(prev?.pendingCount ?? 0, 1),
+            });
+          }
         } else if (this.deps.store.shouldAlertTriageFailure(peerKey, throughId)) {
           void this.deps.sendOwner(
             `telegram triage failed · ${chat.title} · through message ${throughId}: ${result.error ?? 'unknown'}`,
