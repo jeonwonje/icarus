@@ -1,7 +1,4 @@
-import type { InlineKeyboard } from 'grammy';
-import { sendOwnerKeyboard } from '../../telegram/send.js';
 import type { ProjectProposal } from './projectStore.js';
-import { renderProjectProposal } from './projectUi.js';
 import { telegramRuntime } from './runtime.js';
 
 export interface ProjectSweepDeps {

@@ -163,9 +163,15 @@ export function fire(id: number, opts?: { catchUp?: boolean }): void {
 
   if (row.name === PROJECT_SWEEP_JOB) {
     void (async () => {
-      const { runTelegramProjectSweep } = await import('../connectors/telegram/projectSweep.js');
-      const n = await runTelegramProjectSweep();
-      db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`ok:${n} proposals`, id);
+      try {
+        const { runTelegramProjectSweep } = await import('../connectors/telegram/projectSweep.js');
+        const n = await runTelegramProjectSweep();
+        db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`ok:${n} proposals`, id);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        log.error({ name: row.name, err: msg }, 'project sweep failed');
+        db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`err:${msg}`, id);
+      }
     })();
     return;
   }
