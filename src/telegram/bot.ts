@@ -10,6 +10,11 @@ import {
   stopTelegramRuntime,
 } from '../connectors/telegram/runtime.js';
 import {
+  renderArchiveSearch,
+  renderArchiveUnavailable,
+  renderArchiveWindow,
+} from '../connectors/telegram/archiveUi.js';
+import {
   renderTelegramChat,
   renderTelegramDialogs,
   renderTelegramHome,
@@ -285,6 +290,47 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
     }
     return;
   }
+  // -- archive lookup -------------------------------------------------------
+  if (data.startsWith('ar:')) {
+    const runtime = telegramRuntime();
+    if (!runtime) {
+      await ctx.answerCallbackQuery({ text: 'archive unavailable' });
+      return;
+    }
+    try {
+      if (data.startsWith('ar:s:')) {
+        const query = refGet(Number(data.slice('ar:s:'.length)));
+        if (query === undefined) return void (await expired(ctx));
+        await ctx.answerCallbackQuery();
+        const hits = runtime.query().search({ query, includeDeleted: false });
+        await editTo(ctx, renderArchiveSearch(query, hits));
+        return;
+      }
+      if (data.startsWith('ar:w:')) {
+        const parts = data.split(':');
+        const hitRaw = refGet(Number(parts[2]));
+        const query = refGet(Number(parts[3]));
+        if (!hitRaw || query === undefined) return void (await expired(ctx));
+        const hit = JSON.parse(hitRaw) as { peerKey: string; messageId: number };
+        await ctx.answerCallbackQuery();
+        const win = runtime.query().window({
+          peerKey: hit.peerKey,
+          messageId: hit.messageId,
+          includeDeleted: false,
+        });
+        await editTo(ctx, renderArchiveWindow(query, win));
+        return;
+      }
+    } catch (e) {
+      const text = String(e instanceof Error ? e.message : e).slice(0, 190);
+      try {
+        await ctx.answerCallbackQuery({ text });
+      } catch {
+        await ctx.reply(text);
+      }
+      return;
+    }
+  }
   // -- telegram archive -----------------------------------------------------
   if (data === 'tg:home' || data.startsWith('tg:')) {
     const runtime = telegramRuntime();
@@ -430,6 +476,23 @@ export function createBot(): Bot {
     await ctx.reply(r.text, { reply_markup: r.keyboard });
   });
 
+  bot.command('archive', async (ctx) => {
+    const query = ctx.match?.trim() ?? '';
+    if (!query) return void (await ctx.reply('usage: /archive <query>'));
+    const runtime = telegramRuntime();
+    if (!runtime) {
+      const r = renderArchiveUnavailable();
+      return void (await ctx.reply(r.text, { reply_markup: r.keyboard }));
+    }
+    try {
+      const hits = runtime.query().search({ query, includeDeleted: false });
+      const rendered = renderArchiveSearch(query, hits);
+      await ctx.reply(rendered.text, { reply_markup: rendered.keyboard });
+    } catch (e) {
+      await ctx.reply(`archive search failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`);
+    }
+  });
+
   bot.command('tg', async (ctx) => {
     const runtime = telegramRuntime();
     const query = ctx.match?.trim() ?? '';
@@ -554,7 +617,7 @@ export function createBot(): Bot {
       const text = ctx.message.text?.trim();
       if (!text) return;
       if (text.startsWith('/'))
-        return ctx.reply('unknown command — /status /wiki /schedules /model /stop /clear /feedback /revert /tg /restart');
+        return ctx.reply('unknown command — /status /wiki /schedules /model /stop /clear /feedback /revert /tg /archive /restart');
       submitOwnerText(text);
     } catch (e) {
       log.error({ err: String(e) }, 'message handler failed');
@@ -577,6 +640,7 @@ const MENU_COMMANDS = [
   { command: 'feedback', description: 'log feedback for the nightly reflection' },
   { command: 'revert', description: 'roll back a persona change' },
   { command: 'tg', description: 'manage personal Telegram archive' },
+  { command: 'archive', description: 'search archived Telegram messages' },
   { command: 'restart', description: 'restart Icarus' },
 ];
 
