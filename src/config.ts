@@ -103,3 +103,4 @@ export const cfg = {
 export const OWNER_JID = 'dm:owner';
 export const REFLECTION_JOB = 'reflection';
 export const MEMORY_JOB = 'memory-consolidation';
+export const PROJECT_SWEEP_JOB = 'tg-project-sweep';

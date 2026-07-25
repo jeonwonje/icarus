@@ -290,6 +290,25 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
     }
     return;
   }
+  // -- project mapping proposals ------------------------------------------
+  if (data.startsWith('tgmap:ok:') || data.startsWith('tgmap:no:')) {
+    const runtime = telegramRuntime();
+    if (!runtime) return void (await expired(ctx));
+    const id = Number(data.split(':')[2]);
+    if (!Number.isInteger(id) || id <= 0) return void (await expired(ctx));
+    await ctx.answerCallbackQuery();
+    try {
+      const text =
+        data.startsWith('tgmap:ok:') ? await runtime.approveMapping(id) : await runtime.rejectMapping(id);
+      await editTo(ctx, { text, keyboard: new InlineKeyboard() });
+    } catch (e) {
+      await editTo(ctx, {
+        text: String(e instanceof Error ? e.message : e).slice(0, 190),
+        keyboard: new InlineKeyboard(),
+      });
+    }
+    return;
+  }
   // -- archive lookup -------------------------------------------------------
   if (data.startsWith('ar:')) {
     const runtime = telegramRuntime();

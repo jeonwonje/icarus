@@ -122,6 +122,8 @@ export interface TelegramSyncDeps {
    * replay at/below the watermark, or a message that is already pending or already triaged.
    */
   onNewLiveMessage?: (peerKey: string, messageId: number) => void;
+  /** Called after a successful import completion DM; e.g. project-mapping proposals. */
+  onImportComplete?: (peerKey: string) => Promise<void>;
 }
 
 /** A new message an event committed, so the live watermark can follow it. */
@@ -975,6 +977,11 @@ export class TelegramSyncManager {
         `${formatBytes(summary.downloadedMediaBytes)} media · ${summary.linkSnapshots} link snapshots · ` +
         `${summary.failedMedia} failed media · ${summary.failedLinks} failed links`,
     );
+    try {
+      await this.deps.onImportComplete?.(peerKey);
+    } catch (error) {
+      log.warn({ err: error, peerKey }, 'telegram import complete hook failed');
+    }
   }
 
   private async alert(key: string, text: string): Promise<void> {

@@ -1,5 +1,5 @@
 ﻿import { Cron } from 'croner';
-import { cfg, REFLECTION_JOB, MEMORY_JOB } from '../config.js';
+import { cfg, REFLECTION_JOB, MEMORY_JOB, PROJECT_SWEEP_JOB } from '../config.js';
 import { db, now } from '../db.js';
 import { log } from '../log.js';
 import type { TurnResult } from '../queue.js';
@@ -151,6 +151,8 @@ export function seedSystemRows(): void {
       ts,
       ts,
     );
+  if (!db.prepare('SELECT id FROM schedules WHERE name=?').get(PROJECT_SWEEP_JOB))
+    insert.run(PROJECT_SWEEP_JOB, '0 9 * * 1', '(code — proposalEngine.sweep)', ts, ts);
 }
 
 export function fire(id: number, opts?: { catchUp?: boolean }): void {
@@ -158,6 +160,15 @@ export function fire(id: number, opts?: { catchUp?: boolean }): void {
   if (!row || !row.enabled) return;
   db.prepare('UPDATE schedules SET last_fired_at=? WHERE id=?').run(now(), id);
   log.info({ name: row.name, catchUp: opts?.catchUp ?? false }, 'schedule fired');
+
+  if (row.name === PROJECT_SWEEP_JOB) {
+    void (async () => {
+      const { runTelegramProjectSweep } = await import('../connectors/telegram/projectSweep.js');
+      const n = await runTelegramProjectSweep();
+      db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`ok:${n} proposals`, id);
+    })();
+    return;
+  }
 
   const isReflection = row.name === REFLECTION_JOB;
   let prompt: string;

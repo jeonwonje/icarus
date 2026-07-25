@@ -1,9 +1,11 @@
 import type { DatabaseSync } from 'node:sqlite';
+import type { InlineKeyboard } from 'grammy';
 import { cfg } from '../../config.js';
 import { db } from '../../db.js';
 import { submitTurn } from '../../queue.js';
-import { sendOwner } from '../../telegram/send.js';
+import { sendOwner, sendOwnerKeyboard } from '../../telegram/send.js';
 import { GramJsTelegramAdapter } from './adapter.js';
+import { applyApproval } from './briefWriter.js';
 import { TelegramArchiveQuery } from './archiveQuery.js';
 import {
   TelegramArchiveStore,
@@ -12,6 +14,9 @@ import {
 } from './archiveStore.js';
 import { TelegramBlobStore } from './blobStore.js';
 import { LinkSnapshotter } from './linkSnapshot.js';
+import { ProposalEngine } from './proposalEngine.js';
+import { type ProjectProposal, TelegramProjectStore } from './projectStore.js';
+import { renderProjectProposal } from './projectUi.js';
 import { TelegramSyncManager } from './syncManager.js';
 import { TelegramTriageBridge } from './triage.js';
 import type { TelegramAdapter, TelegramDialog, TelegramHealth } from './types.js';
@@ -37,6 +42,7 @@ export interface RuntimeOverrides {
   adapter: TelegramAdapter;
   archiveDir: string;
   notify: (text: string) => Promise<void>;
+  notifyKeyboard?: (text: string, keyboard: InlineKeyboard) => Promise<void>;
 }
 
 /**
@@ -51,12 +57,17 @@ export class TelegramArchiveRuntime {
     private readonly adapter: TelegramAdapter,
     private readonly manager: TelegramSyncManager,
     private readonly bridge: TelegramTriageBridge,
+    private readonly projectStore: TelegramProjectStore,
+    private readonly proposalEngine: ProposalEngine,
+    private readonly notifyKeyboard: (text: string, keyboard: InlineKeyboard) => Promise<void>,
   ) {}
 
   static async create(overrides?: RuntimeOverrides): Promise<TelegramArchiveRuntime> {
     const database = overrides?.db ?? db;
     const archiveDir = overrides?.archiveDir ?? cfg.telegramArchiveDir;
     const notify = overrides?.notify ?? ((text: string) => sendOwner(text));
+    const notifyKeyboard =
+      overrides?.notifyKeyboard ?? ((text: string, keyboard: InlineKeyboard) => sendOwnerKeyboard(text, keyboard));
     const adapter =
       overrides?.adapter ??
       new GramJsTelegramAdapter({
@@ -66,6 +77,13 @@ export class TelegramArchiveRuntime {
       });
     const store = new TelegramArchiveStore(database);
     const archiveQuery = new TelegramArchiveQuery(store);
+    const projectStore = new TelegramProjectStore(database);
+    const proposalEngine = new ProposalEngine({
+      archive: store,
+      projects: projectStore,
+      wikiDir: cfg.wikiDir,
+      query: archiveQuery,
+    });
     const blobs = new TelegramBlobStore(archiveDir);
     const snapshots = new LinkSnapshotter();
     const bridge = new TelegramTriageBridge({
@@ -73,6 +91,17 @@ export class TelegramArchiveRuntime {
       submit: submitTurn,
       sendOwner: notify,
     });
+    const notifyProjectProposal = async (proposal: ProjectProposal): Promise<void> => {
+      const chat = store.getChat(proposal.peerKey);
+      if (!chat) return;
+      const rendered = renderProjectProposal({
+        id: proposal.id,
+        chatTitle: chat.title,
+        wikiProject: proposal.wikiProject,
+        evidence: proposal.evidence,
+      });
+      await notifyKeyboard(rendered.text, rendered.keyboard);
+    };
     const manager = new TelegramSyncManager({
       adapter,
       store,
@@ -81,8 +110,23 @@ export class TelegramArchiveRuntime {
       notify,
       session: overrides ? undefined : cfg.tgSession,
       onNewLiveMessage: (peerKey, messageId) => bridge.noteMessage(peerKey, messageId),
+      onImportComplete: async (peerKey) => {
+        const proposal = proposalEngine.considerChat(peerKey);
+        if (!proposal) return;
+        await notifyProjectProposal(proposal);
+      },
     });
-    return new TelegramArchiveRuntime(store, archiveQuery, blobs, adapter, manager, bridge);
+    return new TelegramArchiveRuntime(
+      store,
+      archiveQuery,
+      blobs,
+      adapter,
+      manager,
+      bridge,
+      projectStore,
+      proposalEngine,
+      notifyKeyboard,
+    );
   }
 
   query(): TelegramArchiveQuery {
@@ -180,6 +224,39 @@ export class TelegramArchiveRuntime {
 
   retry(peerKey: string): void {
     this.manager.retry(peerKey);
+  }
+
+  sweepProjectProposals(): ProjectProposal[] {
+    return this.proposalEngine.sweep();
+  }
+
+  async notifyProjectProposal(proposal: ProjectProposal): Promise<void> {
+    const chat = this.store.getChat(proposal.peerKey);
+    if (!chat) return;
+    const rendered = renderProjectProposal({
+      id: proposal.id,
+      chatTitle: chat.title,
+      wikiProject: proposal.wikiProject,
+      evidence: proposal.evidence,
+    });
+    await this.notifyKeyboard(rendered.text, rendered.keyboard);
+  }
+
+  async approveMapping(id: number): Promise<string> {
+    const result = applyApproval({
+      proposalId: id,
+      projects: this.projectStore,
+      query: this.archiveQuery,
+      archive: this.store,
+      wikiDir: cfg.wikiDir,
+      memoryDir: cfg.memoryDir,
+    });
+    return `approved · brief wiki/${result.briefPath}`;
+  }
+
+  async rejectMapping(id: number): Promise<string> {
+    this.projectStore.rejectProposal(id);
+    return 'rejected · left unmapped';
   }
 
   async removeArchive(peerKey: string): Promise<void> {
