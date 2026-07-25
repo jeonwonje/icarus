@@ -17,6 +17,7 @@ export function telegramConfigState(values: TelegramEnvValues): TelegramConfigSt
 
 export function upsertTelegramEnv(source: string, complete: Required<TelegramEnvValues>): string {
   const newline = source.includes('\r\n') ? '\r\n' : '\n';
+  const hasTerminalNewline = /\r?\n$/.test(source);
   const replacements: Record<string, string> = {
     TG_API_ID: String(complete.apiId),
     TG_API_HASH: complete.apiHash,
@@ -26,19 +27,22 @@ export function upsertTelegramEnv(source: string, complete: Required<TelegramEnv
   const lines = source.length === 0 ? [] : source.replace(/\r?\n$/, '').split(/\r?\n/);
   const output: string[] = [];
   for (const line of lines) {
-    const match = line.match(/^\s*(TG_API_ID|TG_API_HASH|TG_SESSION)=/);
+    const match = line.match(
+      /^(\s*(TG_API_ID|TG_API_HASH|TG_SESSION)\s*=\s*)(.*?)(\s+#.*)?$/,
+    );
     if (!match) {
       output.push(line);
       continue;
     }
-    if (seen.has(match[1])) continue;
-    seen.add(match[1]);
-    output.push(`${match[1]}=${replacements[match[1]]}`);
+    const [, assignment, key, , comment = ''] = match;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(`${assignment}${replacements[key]}${comment}`);
   }
   for (const key of ['TG_API_ID', 'TG_API_HASH', 'TG_SESSION']) {
     if (!seen.has(key)) output.push(`${key}=${replacements[key]}`);
   }
-  return output.join(newline) + newline;
+  return output.join(newline) + (hasTerminalNewline ? newline : '');
 }
 
 export function writeTelegramEnvAtomic(

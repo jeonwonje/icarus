@@ -28,6 +28,27 @@ test('env update preserves unrelated values, comments, and CRLF', () => {
   assert.match(result, /TG_SESSION=session-secret\r\n$/);
 });
 
+test('env update preserves inline comments on Telegram assignments', () => {
+  const result = upsertTelegramEnv('TG_API_HASH=old # keep\n', values);
+  assert.match(result, /TG_API_HASH=hash-secret # keep\n/);
+});
+
+test('env update preserves a missing terminal newline', () => {
+  const source = 'TG_API_ID=old\nTG_API_HASH=old\nTG_SESSION=old';
+  assert.equal(
+    upsertTelegramEnv(source, values),
+    'TG_API_ID=12345\nTG_API_HASH=hash-secret\nTG_SESSION=session-secret',
+  );
+});
+
+test('env update replaces assignments with whitespace around equals', () => {
+  const source = 'TG_API_ID = old\nTG_API_HASH = old\nTG_SESSION = old\n';
+  assert.equal(
+    upsertTelegramEnv(source, values),
+    'TG_API_ID = 12345\nTG_API_HASH = hash-secret\nTG_SESSION = session-secret\n',
+  );
+});
+
 test('atomic writer changes only the destination after complete content exists', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'icarus-tg-env-'));
   const envPath = path.join(dir, '.env');
