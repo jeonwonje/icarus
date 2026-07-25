@@ -73,6 +73,32 @@ The bot answers **only** the user id in `.env`. Everyone else gets silence.
 The personal-account connection is read-only. Icarus never sends, reacts, votes, joins,
 or marks messages read as you.
 
+#### Live smoke checklist
+
+On a real Windows checkout with credentials:
+
+1. Run `npm run tg-setup`; verify secrets never print.
+2. Send `/restart`; `/status` must say connected.
+3. Search one test DM and one test group with `/tg <query>`.
+4. Confirm both imports, restart during backfill, and verify progress resumes.
+5. Compare available/imported counts and inspect downloaded media.
+6. Edit, delete, react, and vote in test chats; verify archive state.
+7. Disconnect networking, reconnect, and verify difference recovery or an explicit
+   degraded-fidelity status.
+8. Trigger simultaneous bursts in both chats; verify separate triage turns.
+9. Verify an unselected chat has no message rows, link rows, media rows, or blobs.
+
+Record observed counts and any Telegram-side permanent failures in the handoff; do not put
+private chat content in git.
+
+#### Troubleshooting
+
+- `tg · partial config`: rerun `npm run tg-setup`; all three Telegram values are required.
+- `tg · authorization failed`: rerun setup to replace the revoked session, then `/restart`.
+- `tg · temporarily offline`: Icarus retries and reconciles automatically; inspect `/tg`.
+- import paused below 10 GB free: free archive-drive space, then tap retry under `/tg`.
+- permanent media/link failures remain listed per chat and do not restart the whole import.
+
 ## Day to day
 
 | You do | It does |
