@@ -320,15 +320,7 @@ export class TelegramArchiveStore {
         message.reactionsJson,
         message.poll ? JSON.stringify(message.poll) : null,
       );
-    this.db
-      .prepare(`DELETE FROM tg_message_fts WHERE peer_key=? AND message_id=?`)
-      .run(message.peerKey, message.messageId);
-    this.db
-      .prepare(
-        `INSERT INTO tg_message_fts(peer_key,message_id,text,link_text)
-                     VALUES(?,?,?,'')`,
-      )
-      .run(message.peerKey, message.messageId, message.text);
+    this.writeMessageFts(message.peerKey, message.messageId, message.text);
     this.upsertChildren(message);
     if (origin === 'live') {
       this.db
@@ -683,6 +675,9 @@ export class TelegramArchiveStore {
 
   /** Lifts only the lane's own low-disk pauses; storage faults stay paused for a human. */
   resumeLowDiskWork(at: string): number {
+    // The lane asks this every cycle, so stay a pure read until there is something to lift.
+    const paused = this.db.prepare(`SELECT 1 FROM tg_work_items WHERE state='paused' LIMIT 1`).get();
+    if (!paused) return 0;
     this.db.exec('BEGIN');
     try {
       const result = this.db
@@ -898,8 +893,15 @@ export class TelegramArchiveStore {
     const message = this.db
       .prepare(`SELECT text FROM tg_messages WHERE peer_key=? AND message_id=?`)
       .get(peerKey, messageId) as unknown as { text: string } | undefined;
-    if (!message) return;
-    const linkText = this.db
+    if (message) this.writeMessageFts(peerKey, messageId, message.text);
+  }
+
+  /**
+   * Rewrites the search row from the message text plus whatever link snapshots are stored,
+   * so an edit or a reaction cannot silently drop link text from the index.
+   */
+  private writeMessageFts(peerKey: string, messageId: number, text: string): void {
+    const links = this.db
       .prepare(
         `SELECT COALESCE(GROUP_CONCAT(extracted_text,' '),'') AS text FROM tg_links
          WHERE peer_key=? AND message_id=? AND extracted_text IS NOT NULL`,
@@ -910,7 +912,7 @@ export class TelegramArchiveStore {
       .run(peerKey, messageId);
     this.db
       .prepare(`INSERT INTO tg_message_fts(peer_key,message_id,text,link_text) VALUES(?,?,?,?)`)
-      .run(peerKey, messageId, message.text, linkText.text);
+      .run(peerKey, messageId, text, links.text);
   }
 
   private changed(sql: string, ...params: (string | number)[]): boolean {
@@ -1001,12 +1003,7 @@ export class TelegramArchiveStore {
         peerKey,
         messageId,
       );
-    this.db
-      .prepare(`DELETE FROM tg_message_fts WHERE peer_key=? AND message_id=?`)
-      .run(peerKey, messageId);
-    this.db
-      .prepare(`INSERT INTO tg_message_fts(peer_key,message_id,text,link_text) VALUES(?,?,?,'')`)
-      .run(peerKey, messageId, snapshot.text);
+    this.writeMessageFts(peerKey, messageId, snapshot.text);
   }
 
   replaceReactions(peerKey: string, messageId: number, json: string, observedAt: string): void {

@@ -245,7 +245,7 @@ export class TelegramSyncManager {
       else if (item.kind === 'link') await this.processLink(item, at);
       else this.deps.store.failWorkItem(item.id, `unsupported work kind: ${item.kind}`);
     } catch (error) {
-      this.recordWorkFailure(item, error, at);
+      await this.recordWorkFailure(item, error, at);
     }
   }
 
@@ -266,13 +266,13 @@ export class TelegramSyncManager {
         workItemId: item.id,
         mediaKey: target.mediaKey,
         peerKey: target.peerKey,
-        error: `archive volume below ${formatGb(required)} free`,
+        error: `archive volume below ${formatBytes(required)} free`,
         disposition: 'low_disk',
         retryAt: addMs(at, LOW_DISK_RETRY_MS),
       });
       await this.alert(
         LOW_DISK_ALERT,
-        `telegram media paused · low disk · needs ${formatGb(required)} free`,
+        `telegram media paused · low disk · needs ${formatBytes(required)} free`,
       );
       return;
     }
@@ -311,13 +311,13 @@ export class TelegramSyncManager {
       return;
     }
     if (!this.deps.blobs.hasFreeSpace(MIN_FREE_BYTES)) {
-      this.deps.store.pauseWorkItem(item.id, `archive volume below ${formatGb(MIN_FREE_BYTES)} free`, {
+      this.deps.store.pauseWorkItem(item.id, `archive volume below ${formatBytes(MIN_FREE_BYTES)} free`, {
         lowDisk: true,
         retryAt: addMs(at, LOW_DISK_RETRY_MS),
       });
       await this.alert(
         LOW_DISK_ALERT,
-        `telegram link snapshots paused · low disk · needs ${formatGb(MIN_FREE_BYTES)} free`,
+        `telegram link snapshots paused · low disk · needs ${formatBytes(MIN_FREE_BYTES)} free`,
       );
       return;
     }
@@ -357,7 +357,11 @@ export class TelegramSyncManager {
     });
   }
 
-  private recordWorkFailure(item: TelegramWorkItem, error: unknown, at: string): void {
+  private async recordWorkFailure(
+    item: TelegramWorkItem,
+    error: unknown,
+    at: string,
+  ): Promise<void> {
     const failure = classifyFailure(error);
     const delay = RETRY_DELAYS_MS[item.attempts];
     const disposition =
@@ -391,7 +395,7 @@ export class TelegramSyncManager {
       this.deps.store.failWorkItem(item.id, failure.message, retryAt);
     }
     if (disposition === 'storage') {
-      void this.alert(
+      await this.alert(
         `storage:${item.peerKey}`,
         `telegram archive storage error · ${failure.message}`,
       );
@@ -438,7 +442,7 @@ export class TelegramSyncManager {
     if (!summary) return;
     await this.announce(
       `telegram import complete · ${summary.title} · ${summary.importedMessages} messages · ` +
-        `${formatGb(summary.downloadedMediaBytes)} media · ${summary.linkSnapshots} link snapshots · ` +
+        `${formatBytes(summary.downloadedMediaBytes)} media · ${summary.linkSnapshots} link snapshots · ` +
         `${summary.failedMedia} failed media · ${summary.failedLinks} failed links`,
     );
   }
@@ -465,4 +469,14 @@ export class TelegramSyncManager {
 
 const addMs = (at: string, ms: number): string => new Date(Date.parse(at) + ms).toISOString();
 
-const formatGb = (bytes: number): string => `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+
+function formatBytes(bytes: number): string {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? value : value.toFixed(1)} ${UNITS[unit]}`;
+}

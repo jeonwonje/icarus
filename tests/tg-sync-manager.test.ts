@@ -263,6 +263,29 @@ test('link acquisition stores a snapshot and makes its text searchable', async (
   );
 });
 
+test('a later edit keeps the stored link snapshot searchable', async () => {
+  const links = [{ url: 'https://example.com/a' }];
+  const { manager, db, store } = makeMediaHarness({
+    media: [],
+    links,
+    fetcher: async () =>
+      new Response('<h1>Nomad Capitalist</h1>', { headers: { 'content-type': 'text/html' } }),
+  });
+  await drain(manager);
+  store.applyMessages(
+    [historyMessage(1, { text: 'edited', editedAt: '2026-01-02T00:00:00.000Z', links })],
+    'live',
+  );
+  const matches = (term: string): number =>
+    (
+      db
+        .prepare(`SELECT COUNT(1) AS n FROM tg_message_fts WHERE tg_message_fts MATCH ?`)
+        .get(term) as unknown as { n: number }
+    ).n;
+  assert.equal(matches('edited'), 1);
+  assert.equal(matches('Nomad'), 1);
+});
+
 test('an unavailable link is recorded once without failing the work lane', async () => {
   const { manager, db } = makeMediaHarness({
     media: [],
