@@ -186,11 +186,6 @@ function browserEntry(): StdioEntry {
   return entry;
 }
 
-function fail(message: string): never {
-  console.error(`FAIL: ${message}`);
-  process.exit(1);
-}
-
 async function main(): Promise<void> {
   const entry = browserEntry();
   const command = expandEnvRefs(entry.command);
@@ -201,6 +196,11 @@ async function main(): Promise<void> {
 
   console.log(`spawning: ${command} ${args.join(' ')}`);
   const child = spawn(command, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const fail = (message: string): never => {
+    console.error(`FAIL: ${message}`);
+    child.kill();
+    process.exit(1);
+  };
   child.on('error', (e) => fail(`could not spawn the browser server: ${e.message}`));
 
   const reader = createLineReader();
