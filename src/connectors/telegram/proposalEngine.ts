@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { TelegramArchiveQuery } from './archiveQuery.js';
 import type { TelegramArchiveStore } from './archiveStore.js';
 import type { ProjectProposal, TelegramProjectStore } from './projectStore.js';
-import { listWikiProjects, tokenize, type WikiProject } from './wikiProjects.js';
+import { tokenize, type WikiProject } from './wikiProjects.js';
 
 export interface MatchResult {
   wikiProject: string;
@@ -104,8 +104,6 @@ export function matchChatToProjects(input: {
 }
 
 export class ProposalEngine {
-  private readonly wikiProjects: WikiProject[];
-
   constructor(
     private readonly deps: {
       archive: TelegramArchiveStore;
@@ -113,52 +111,14 @@ export class ProposalEngine {
       wikiDir: string;
       query?: TelegramArchiveQuery;
     },
-  ) {
-    this.wikiProjects = listWikiProjects(deps.wikiDir);
-  }
+  ) {}
 
-  considerChat(peerKey: string): ProjectProposal | null {
-    if (this.wikiProjects.length === 0) return null;
-    if (!this.deps.archive.isSelected(peerKey)) return null;
-    if (this.deps.projects.hasMapping(peerKey)) return null;
-    if (this.deps.projects.getPendingForPeer(peerKey)) return null;
-
-    const chat = this.deps.archive.getChat(peerKey);
-    if (!chat) return null;
-
-    const match = matchChatToProjects({
-      title: chat.title,
-      username: chat.username,
-      projects: this.wikiProjects,
-    });
-    if (!match) return null;
-
-    let evidence = match.evidence;
-    if (this.deps.query) {
-      const hits = this.deps.query.search({
-        query: match.wikiProject.replace(/-/g, ' '),
-        peerKey,
-        limit: 3,
-      });
-      if (hits.length > 0) {
-        evidence += `; archive: ${hits.map((h) => h.snippet.slice(0, 80)).join(' | ')}`;
-      }
-    }
-
-    return this.deps.projects.enqueueProposal({
-      peerKey,
-      wikiProject: match.wikiProject,
-      evidence,
-      score: match.score,
-      fingerprint: match.fingerprint,
-    });
+  /** Title matching removed — LLM triage/historical passes enqueue proposals via WikiFactWriter. */
+  considerChat(_peerKey: string): ProjectProposal | null {
+    return null;
   }
 
   sweep(): ProjectProposal[] {
-    for (const chat of this.deps.archive.listSelectedChats()) {
-      if (this.deps.projects.hasMapping(chat.peerKey)) continue;
-      this.considerChat(chat.peerKey);
-    }
-    return this.deps.projects.listUnnotifiedPending();
+    return [];
   }
 }

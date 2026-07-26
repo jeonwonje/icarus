@@ -28,7 +28,7 @@ test('listWikiProjects reads ### [slug](slug/index.md) headings only', () => {
   );
 });
 
-test('considerChat enqueues when title overlaps project slug', () => {
+test('considerChat no longer auto-proposes from title overlap', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'wiki-'));
   writeFileSync(
     path.join(root, 'index.md'),
@@ -49,10 +49,8 @@ test('considerChat enqueues when title overlaps project slug', () => {
     projects,
     wikiDir: root,
   });
-  const created = engine.considerChat('group:1');
-  assert.ok(created);
-  assert.equal(created.wikiProject, 'morianlabs');
-  assert.equal(engine.considerChat('group:1'), null); // pending exists
+  assert.equal(engine.considerChat('group:1'), null);
+  assert.equal(projects.listProposals('pending').length, 0);
 });
 
 test('matchChatToProjects rejects weak single-token slug substring matches', () => {
@@ -68,7 +66,7 @@ test('matchChatToProjects rejects weak single-token slug substring matches', () 
   assert.equal(matchChatToProjects({ title: 'Data dump', projects }), null);
 });
 
-test('sweep skips rejected fingerprint', () => {
+test('sweep returns empty — mapping is LLM-driven via historical pass', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'wiki-'));
   writeFileSync(
     path.join(root, 'index.md'),
@@ -85,7 +83,5 @@ test('sweep skips rejected fingerprint', () => {
   });
   const projects = new TelegramProjectStore(db);
   const engine = new ProposalEngine({ archive, projects, wikiDir: root });
-  const p = engine.considerChat('group:1');
-  projects.rejectProposal(p!.id);
   assert.equal(engine.sweep().length, 0);
 });

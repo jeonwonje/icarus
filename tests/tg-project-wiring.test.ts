@@ -8,13 +8,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { PROJECT_SWEEP_JOB } from '../src/config.js';
 import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
-import { ProposalEngine } from '../src/connectors/telegram/proposalEngine.js';
+import { TelegramArchiveQuery } from '../src/connectors/telegram/archiveQuery.js';
+import { TelegramHistoricalPass } from '../src/connectors/telegram/historicalPass.js';
 import { TelegramProjectStore } from '../src/connectors/telegram/projectStore.js';
 import { runTelegramProjectSweep } from '../src/connectors/telegram/projectSweep.js';
 import { migrateDb, openDb, db } from '../src/db.js';
 import { fire, seedSystemRows, setEnqueue } from '../src/scheduler/scheduler.js';
 
-test('runTelegramProjectSweep DMs one keyboard per new proposal', async () => {
+test('runTelegramProjectSweep enqueues historical passes and DMs unnotified pending', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'wiki-'));
   writeFileSync(
     path.join(root, 'index.md'),
@@ -35,19 +36,52 @@ test('runTelegramProjectSweep DMs one keyboard per new proposal', async () => {
     title: 'Morian Labs ops',
     selected: true,
   });
+  archive.applyMessages(
+    [
+      { peerKey: 'group:1', messageId: 1, text: 'a', sentAt: '2026-01-01T00:00:00.000Z', entitiesJson: '[]', reactionsJson: '[]', media: [], links: [] },
+      { peerKey: 'group:2', messageId: 1, text: 'b', sentAt: '2026-01-01T00:00:00.000Z', entitiesJson: '[]', reactionsJson: '[]', media: [], links: [] },
+    ],
+    'backfill',
+  );
   const projects = new TelegramProjectStore(db);
-  const engine = new ProposalEngine({ archive, projects, wikiDir: root });
+  const jobs: { jid: string }[] = [];
+  const pass = new TelegramHistoricalPass({
+    store: archive,
+    query: new TelegramArchiveQuery(archive),
+    submit: (job) => jobs.push({ jid: job.jid }),
+    applyOutput: () => ({
+      digest: '',
+      mappingProposal: null,
+      appended: 0,
+      approvalNotices: [],
+      alerts: [],
+    }),
+    notifyDigest: async () => {},
+    notifyMapping: async () => {},
+    notifyApprovals: async () => {},
+    listWikiProjects: () => [{ slug: 'morianlabs', title: 'Morian Duck' }],
+    getMapping: (peerKey) => projects.getMapping(peerKey),
+  });
+  const sweep = () => {
+    for (const chat of archive.listSelectedChats()) {
+      if (projects.hasMapping(chat.peerKey)) continue;
+      if (projects.getPendingForPeer(chat.peerKey)) continue;
+      pass.enqueue(chat.peerKey);
+    }
+    return projects.listUnnotifiedPending();
+  };
   const dms: string[] = [];
   const count = await runTelegramProjectSweep({
-    sweep: () => engine.sweep(),
+    sweep,
     getChatTitle: (peerKey) => archive.getChat(peerKey)?.title,
     notifyProposal: async (input) => {
       dms.push(`${input.chatTitle}:${input.wikiProject}`);
     },
     markNotified: (id) => projects.markProposalNotified(id),
   });
-  assert.equal(count, 2);
-  assert.equal(dms.length, 2);
+  assert.equal(count, 0);
+  assert.equal(dms.length, 0);
+  assert.equal(jobs.length, 2);
 });
 
 test('sweep retries DM for pending proposal with null notified_at without re-enqueue', async () => {
@@ -66,7 +100,6 @@ test('sweep retries DM for pending proposal with null notified_at without re-enq
     selected: true,
   });
   const projects = new TelegramProjectStore(db);
-  const engine = new ProposalEngine({ archive, projects, wikiDir: root });
   const proposal = projects.enqueueProposal({
     peerKey: 'group:1',
     wikiProject: 'morianlabs',
@@ -77,7 +110,7 @@ test('sweep retries DM for pending proposal with null notified_at without re-enq
   assert.equal(proposal.notifiedAt, undefined);
   const dms: string[] = [];
   const count = await runTelegramProjectSweep({
-    sweep: () => engine.sweep(),
+    sweep: () => projects.listUnnotifiedPending(),
     getChatTitle: (peerKey) => archive.getChat(peerKey)?.title,
     notifyProposal: async (input) => {
       dms.push(`${input.id}:${input.chatTitle}`);
@@ -91,7 +124,7 @@ test('sweep retries DM for pending proposal with null notified_at without re-enq
   assert.ok(projects.getProposal(proposal.id)?.notifiedAt);
   dms.length = 0;
   const retryCount = await runTelegramProjectSweep({
-    sweep: () => engine.sweep(),
+    sweep: () => projects.listUnnotifiedPending(),
     getChatTitle: (peerKey) => archive.getChat(peerKey)?.title,
     notifyProposal: async (input) => {
       dms.push(String(input.id));

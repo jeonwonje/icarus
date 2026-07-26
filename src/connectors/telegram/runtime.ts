@@ -14,6 +14,7 @@ import {
 } from './archiveStore.js';
 import { TelegramBlobStore } from './blobStore.js';
 import { LinkSnapshotter } from './linkSnapshot.js';
+import { TelegramHistoricalPass } from './historicalPass.js';
 import { ProposalEngine } from './proposalEngine.js';
 import { type ProjectProposal, TelegramProjectStore } from './projectStore.js';
 import { renderProjectProposal } from './projectUi.js';
@@ -59,6 +60,7 @@ export class TelegramArchiveRuntime {
     private readonly adapter: TelegramAdapter,
     private readonly manager: TelegramSyncManager,
     private readonly bridge: TelegramTriageBridge,
+    private readonly historicalPass: TelegramHistoricalPass,
     private readonly projectStore: TelegramProjectStore,
     private readonly proposalEngine: ProposalEngine,
     private readonly notifyKeyboard: (text: string, keyboard: InlineKeyboard) => Promise<void>,
@@ -118,6 +120,19 @@ export class TelegramArchiveRuntime {
       listWikiProjects: () => listWikiProjects(cfg.wikiDir),
       getMapping: (peerKey) => projectStore.getMapping(peerKey),
     });
+    const historicalPass = new TelegramHistoricalPass({
+      store,
+      query: archiveQuery,
+      submit: submitTurn,
+      applyOutput: (peerKey, output) => factWriter.apply(peerKey, output),
+      notifyDigest: notify,
+      notifyMapping: notifyProjectProposal,
+      notifyApprovals: async (texts) => {
+        for (const text of texts) await notify(text);
+      },
+      listWikiProjects: () => listWikiProjects(cfg.wikiDir),
+      getMapping: (peerKey) => projectStore.getMapping(peerKey),
+    });
     const manager = new TelegramSyncManager({
       adapter,
       store,
@@ -127,9 +142,7 @@ export class TelegramArchiveRuntime {
       session: overrides ? undefined : cfg.tgSession,
       onNewLiveMessage: (peerKey, messageId) => bridge.noteMessage(peerKey, messageId),
       onImportComplete: async (peerKey) => {
-        const proposal = proposalEngine.considerChat(peerKey);
-        if (!proposal) return;
-        await notifyProjectProposal(proposal);
+        historicalPass.enqueue(peerKey);
       },
     });
     return new TelegramArchiveRuntime(
@@ -139,6 +152,7 @@ export class TelegramArchiveRuntime {
       adapter,
       manager,
       bridge,
+      historicalPass,
       projectStore,
       proposalEngine,
       notifyKeyboard,
@@ -152,6 +166,7 @@ export class TelegramArchiveRuntime {
   async start(): Promise<void> {
     await this.manager.start();
     this.bridge.start();
+    this.historicalPass.enqueueCatchUp();
   }
 
   async stop(): Promise<void> {
@@ -243,7 +258,12 @@ export class TelegramArchiveRuntime {
   }
 
   sweepProjectProposals(): ProjectProposal[] {
-    return this.proposalEngine.sweep();
+    for (const chat of this.store.listSelectedChats()) {
+      if (this.projectStore.hasMapping(chat.peerKey)) continue;
+      if (this.projectStore.getPendingForPeer(chat.peerKey)) continue;
+      this.historicalPass.enqueue(chat.peerKey);
+    }
+    return this.projectStore.listUnnotifiedPending();
   }
 
   async notifyProjectProposal(proposal: ProjectProposal): Promise<void> {
