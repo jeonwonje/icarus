@@ -1,4 +1,5 @@
 import { improveModule } from './improve/index.js';
+import { memoryModule } from './memory/index.js';
 import { browserModule } from './browser/index.js';
 import { calendarModule } from './calendar/index.js';
 import { canvasModule } from './canvas/index.js';
@@ -10,7 +11,7 @@ export type { Module, ModuleHost } from './types.js';
 export { createModuleHost, mcpServersForTurn, extraTools, setModuleHost, getModuleHost, getHostSnapshot } from './host.js';
 
 /** Explicit ordered list — Tasks 2–7 push real modules here. */
-export const MODULES: Module[] = [calendarModule, browserModule, canvasModule, mailModule, improveModule];
+export const MODULES: Module[] = [calendarModule, browserModule, canvasModule, mailModule, improveModule, memoryModule];
 
 export async function registerAll(host: ModuleHost, modules: Module[] = MODULES): Promise<void> {
   for (const mod of modules) {

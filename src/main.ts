@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { cfg, MEMORY_JOB, PROJECT_SWEEP_JOB } from './config.js';
+import { cfg, PROJECT_SWEEP_JOB } from './config.js';
 import { db, getSetting, now, openDb, setSetting } from './db.js';
 
 openDb();
@@ -137,19 +137,6 @@ scheduler.setEnqueue((name, prompt, { capMs, after }) => {
       if (body.trim()) void sendOwner(ownerVoice.ops.jobPrefix(name, body));
     },
   });
-});
-
-// TODO(Task 6): move memory-consolidation seed to memory module
-scheduler.seedSchedule({
-  name: MEMORY_JOB,
-  cron: '15 4 * * *',
-  prompt:
-    `Consolidate the memory directory at ${cfg.memoryDir}. Merge duplicate entries across ` +
-    `topic files, prune stale or superseded facts, and keep MEMORY.md an accurate index of ` +
-    `one-liners under 4 KB (detail belongs in topic files, not the index). Surgical edits ` +
-    `only — never rewrite wholesale. Reply with one short line describing what changed, ` +
-    `e.g. "merged 2 duplicate people entries" or "no changes needed".`,
-  catch_up: true,
 });
 
 // TODO(Task 7): move tg-project-sweep seed to tg-archive module
