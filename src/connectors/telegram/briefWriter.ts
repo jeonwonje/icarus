@@ -161,6 +161,52 @@ export function writeBriefAndMemory(input: {
   return { briefPath: briefRel };
 }
 
+export interface AppendFact {
+  claim: string;
+  cites: string[];
+}
+
+/** Append fact bullets under ## Notes (creates section if missing). Returns count appended. */
+export function appendFactsToBrief(
+  wikiDir: string,
+  briefRel: string,
+  facts: AppendFact[],
+): number {
+  if (facts.length === 0) return 0;
+  const briefFull = assertSafeWikiPath(wikiDir, briefRel);
+  if (!existsSync(briefFull)) throw new Error(`brief not found: ${briefRel}`);
+
+  const bullets = facts.map((f) => {
+    const citePart = f.cites.join(', ');
+    return `- ${f.claim} — ${citePart}`;
+  });
+
+  let content = readFileSync(briefFull, 'utf8');
+  const notesHeader = '## Notes';
+  const idx = content.indexOf(notesHeader);
+
+  if (idx >= 0) {
+    const afterHeader = idx + notesHeader.length;
+    const rest = content.slice(afterHeader);
+    const nextSection = rest.search(/\n## /);
+    if (nextSection >= 0) {
+      const insertPos = afterHeader + nextSection;
+      content =
+        content.slice(0, insertPos).replace(/\s*$/, '') +
+        '\n' +
+        bullets.join('\n') +
+        content.slice(insertPos);
+    } else {
+      content = content.trimEnd() + '\n' + bullets.join('\n') + '\n';
+    }
+  } else {
+    content = content.trimEnd() + '\n\n' + notesHeader + '\n' + bullets.join('\n') + '\n';
+  }
+
+  writeFileSync(briefFull, content, 'utf8');
+  return facts.length;
+}
+
 export function applyApproval(input: {
   proposalId: number;
   projects: TelegramProjectStore;
