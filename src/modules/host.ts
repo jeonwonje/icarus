@@ -5,6 +5,7 @@ import type {
   SystemScheduleSpec,
   TurnJobLike,
 } from './types.js';
+import { seedSchedule as schedulerSeedSchedule } from '../scheduler/scheduler.js';
 
 let moduleHost: ModuleHost | undefined;
 
@@ -81,6 +82,7 @@ export function createModuleHost(): ModuleHost & { snapshot(): HostSnapshot } {
     },
     seedSchedule(spec) {
       state.schedules.push(spec);
+      schedulerSeedSchedule(spec);
     },
     snapshot() {
       return snapshotOf(state);

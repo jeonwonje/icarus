@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { cfg } from '../config.js';
-import { db } from '../db.js';
-import { LESSONS_FILE, PERSONA_FILE } from '../agent/persona.js';
+import { cfg } from '../../config.js';
+import { db } from '../../db.js';
+import { LESSONS_FILE, PERSONA_FILE } from '../../agent/persona.js';
 import { listCases } from './evals.js';
 
 export interface ReflectionInput {

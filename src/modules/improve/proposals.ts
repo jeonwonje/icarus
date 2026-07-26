@@ -1,13 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { InlineKeyboard } from 'grammy';
-import { cfg } from '../config.js';
-import { db, now } from '../db.js';
-import { unifiedDiff } from '../diff.js';
-import { log } from '../log.js';
-import { ownerVoice } from '../agent/ownerVoice.js';
-import { LESSONS_FILE, PERSONA_FILE } from '../agent/persona.js';
-import { sendOwner, sendOwnerDocument, sendOwnerKeyboard } from '../telegram/send.js';
+import { cfg } from '../../config.js';
+import { db, now } from '../../db.js';
+import { unifiedDiff } from '../../diff.js';
+import { log } from '../../log.js';
+import { ownerVoice } from '../../agent/ownerVoice.js';
+import { LESSONS_FILE, PERSONA_FILE } from '../../agent/persona.js';
+import { sendOwner, sendOwnerDocument, sendOwnerKeyboard } from '../../telegram/send.js';
 import { listCases, runEvals } from './evals.js';
 
 export interface ProposalRow {

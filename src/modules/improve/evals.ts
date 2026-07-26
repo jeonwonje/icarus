@@ -1,9 +1,9 @@
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { cfg, resolveModel, buildSdkEnv } from '../config.js';
-import { db, now } from '../db.js';
-import { log } from '../log.js';
+import { cfg, resolveModel, buildSdkEnv } from '../../config.js';
+import { db, now } from '../../db.js';
+import { log } from '../../log.js';
 
 export interface EvalCase {
   id: string;

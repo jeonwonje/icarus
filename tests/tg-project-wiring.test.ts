@@ -13,7 +13,7 @@ import { TelegramHistoricalPass } from '../src/connectors/telegram/historicalPas
 import { TelegramProjectStore } from '../src/connectors/telegram/projectStore.js';
 import { runTelegramProjectSweep } from '../src/connectors/telegram/projectSweep.js';
 import { migrateDb, openDb, db } from '../src/db.js';
-import { fire, seedSystemRows, setEnqueue } from '../src/scheduler/scheduler.js';
+import { fire, seedSchedule, setEnqueue } from '../src/scheduler/scheduler.js';
 
 test('runTelegramProjectSweep enqueues historical passes and DMs unnotified pending', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'wiki-'));
@@ -135,10 +135,16 @@ test('sweep retries DM for pending proposal with null notified_at without re-enq
   assert.equal(dms.length, 0);
 });
 
-test('seedSystemRows inserts weekly project sweep job', () => {
+test('seedSchedule inserts weekly project sweep job', () => {
   openDb();
   db.prepare('DELETE FROM schedules WHERE name=?').run(PROJECT_SWEEP_JOB);
-  seedSystemRows();
+  seedSchedule({
+    name: PROJECT_SWEEP_JOB,
+    cron: '0 9 * * 1',
+    prompt: '(code — historicalPass + notify pending)',
+    catch_up: true,
+    onFire: async () => {},
+  });
   const row = db.prepare('SELECT name,cron,prompt FROM schedules WHERE name=?').get(PROJECT_SWEEP_JOB) as
     | { name: string; cron: string; prompt: string }
     | undefined;
@@ -150,7 +156,13 @@ test('seedSystemRows inserts weekly project sweep job', () => {
 test('fire on project sweep does not enqueue an agent turn', async () => {
   openDb();
   db.prepare('DELETE FROM schedules WHERE name=?').run(PROJECT_SWEEP_JOB);
-  seedSystemRows();
+  seedSchedule({
+    name: PROJECT_SWEEP_JOB,
+    cron: '0 9 * * 1',
+    prompt: '(code — historicalPass + notify pending)',
+    catch_up: true,
+    onFire: async () => {},
+  });
   const row = db.prepare('SELECT id FROM schedules WHERE name=?').get(PROJECT_SWEEP_JOB) as { id: number };
   let enqueued = 0;
   setEnqueue(() => {

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { cfg } from './config.js';
+import { cfg, MEMORY_JOB, PROJECT_SWEEP_JOB } from './config.js';
 import { db, getSetting, now, openDb, setSetting } from './db.js';
 
 openDb();
@@ -82,7 +82,7 @@ if (process.argv.includes('--selftest')) {
 }
 
 if (process.argv.includes('--evals')) {
-  const { runEvals, listCases } = await import('./improve/evals.js');
+  const { runEvals, listCases } = await import('./modules/improve/evals.js');
   const cases = listCases();
   if (cases.length === 0) {
     console.log('no eval cases in evals/cases/');
@@ -110,7 +110,6 @@ const { runTurn } = await import('./agent/runner.js');
 const { drainOutbox } = await import('./outbox.js');
 const scheduler = await import('./scheduler/scheduler.js');
 const { registerCodeJobs, trackTokenAge } = await import('./scheduler/jobs.js');
-const { ensurePersonaBaseline } = await import('./improve/proposals.js');
 
 const bot = createBot();
 setBot(bot);
@@ -140,7 +139,38 @@ scheduler.setEnqueue((name, prompt, { capMs, after }) => {
   });
 });
 
-scheduler.seedSystemRows();
+// TODO(Task 6): move memory-consolidation seed to memory module
+scheduler.seedSchedule({
+  name: MEMORY_JOB,
+  cron: '15 4 * * *',
+  prompt:
+    `Consolidate the memory directory at ${cfg.memoryDir}. Merge duplicate entries across ` +
+    `topic files, prune stale or superseded facts, and keep MEMORY.md an accurate index of ` +
+    `one-liners under 4 KB (detail belongs in topic files, not the index). Surgical edits ` +
+    `only — never rewrite wholesale. Reply with one short line describing what changed, ` +
+    `e.g. "merged 2 duplicate people entries" or "no changes needed".`,
+  catch_up: true,
+});
+
+// TODO(Task 7): move tg-project-sweep seed to tg-archive module
+scheduler.seedSchedule({
+  name: PROJECT_SWEEP_JOB,
+  cron: '0 9 * * 1',
+  prompt: '(code — historicalPass + notify pending)',
+  catch_up: true,
+  onFire: async ({ id }) => {
+    try {
+      const { runTelegramProjectSweep } = await import('./connectors/telegram/projectSweep.js');
+      const n = await runTelegramProjectSweep();
+      db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`ok:${n} proposals`, id);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log.error({ name: PROJECT_SWEEP_JOB, err: msg }, 'project sweep failed');
+      db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`err:${msg}`, id);
+    }
+  },
+});
+
 scheduler.reloadSchedules();
 trackTokenAge();
 registerCodeJobs();
@@ -152,7 +182,6 @@ try {
   log.error({ err: String(e) }, 'telegram archive runtime failed to start');
   void sendOwner(ownerVoice.ops.archiveFailedToStart(String(e)));
 }
-ensurePersonaBaseline();
 
 // ---- watchdog + process safety -------------------------------------------
 

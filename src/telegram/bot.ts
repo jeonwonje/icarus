@@ -25,7 +25,7 @@ import { log } from '../log.js';
 import { clearPending, hasPending, queueStatus, submitTurn, abortRunning } from '../queue.js';
 import { ownerVoice } from '../agent/ownerVoice.js';
 import { clearSession, getSession } from '../agent/sessions.js';
-import { decideProposal, latestPending, listPersonaVersions, revertToVersion } from '../improve/proposals.js';
+import { decideProposal, latestPending, listPersonaVersions, revertToVersion } from '../modules/improve/proposals.js';
 import { getHostSnapshot } from '../modules/host.js';
 import type { HostSnapshot, ModuleHost } from '../modules/types.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';

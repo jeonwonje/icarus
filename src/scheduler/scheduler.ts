@@ -1,9 +1,9 @@
 ﻿import { Cron } from 'croner';
-import { cfg, REFLECTION_JOB, MEMORY_JOB, PROJECT_SWEEP_JOB } from '../config.js';
+import { cfg } from '../config.js';
 import { db, now } from '../db.js';
 import { log } from '../log.js';
+import type { SystemScheduleSpec } from '../modules/types.js';
 import type { TurnResult } from '../queue.js';
-import { buildReflectionPrompt } from '../improve/reflect.js';
 
 export interface ScheduleRow {
   id: number;
@@ -31,6 +31,7 @@ let enqueue: EnqueueFn = () => {
   throw new Error('scheduler enqueue not wired');
 };
 const crons = new Map<number, Cron>();
+const scheduleHandlers = new Map<string, SystemScheduleSpec>();
 
 export function setEnqueue(fn: EnqueueFn): void {
   enqueue = fn;
@@ -131,79 +132,53 @@ export function removeSchedule(id: number): void {
   reloadSchedules();
 }
 
-export function seedSystemRows(): void {
+/** Insert a system schedule row if missing and register its fire handler. */
+export function seedSchedule(spec: SystemScheduleSpec): void {
+  scheduleHandlers.set(spec.name, spec);
   const insert = db.prepare(
     `INSERT INTO schedules(name,cron,tz,prompt,enabled,catch_up,system,created_at,updated_at)
-     VALUES(?,?,NULL,?,1,1,1,?,?)`,
+     VALUES(?,?,NULL,?,1,?,1,?,?)`,
   );
   const ts = now();
-  if (!db.prepare('SELECT id FROM schedules WHERE name=?').get(REFLECTION_JOB))
-    insert.run(REFLECTION_JOB, '30 3 * * *', '(dynamic — built by reflect.ts each run)', ts, ts);
-  if (!db.prepare('SELECT id FROM schedules WHERE name=?').get(MEMORY_JOB))
-    insert.run(
-      MEMORY_JOB,
-      '15 4 * * *',
-      `Consolidate the memory directory at ${cfg.memoryDir}. Merge duplicate entries across ` +
-        `topic files, prune stale or superseded facts, and keep MEMORY.md an accurate index of ` +
-        `one-liners under 4 KB (detail belongs in topic files, not the index). Surgical edits ` +
-        `only — never rewrite wholesale. Reply with one short line describing what changed, ` +
-        `e.g. "merged 2 duplicate people entries" or "no changes needed".`,
-      ts,
-      ts,
-    );
-  if (!db.prepare('SELECT id FROM schedules WHERE name=?').get(PROJECT_SWEEP_JOB))
-    insert.run(PROJECT_SWEEP_JOB, '0 9 * * 1', '(code — historicalPass + notify pending)', ts, ts);
+  if (!db.prepare('SELECT id FROM schedules WHERE name=?').get(spec.name)) {
+    insert.run(spec.name, spec.cron, spec.prompt, spec.catch_up ? 1 : 0, ts, ts);
+  }
 }
 
-export function fire(id: number, opts?: { catchUp?: boolean }): void {
+export async function fire(id: number, opts?: { catchUp?: boolean }): Promise<void> {
   const row = getSchedule(id);
   if (!row || !row.enabled) return;
   db.prepare('UPDATE schedules SET last_fired_at=? WHERE id=?').run(now(), id);
   log.info({ name: row.name, catchUp: opts?.catchUp ?? false }, 'schedule fired');
 
-  if (row.name === PROJECT_SWEEP_JOB) {
-    void (async () => {
-      try {
-        const { runTelegramProjectSweep } = await import('../connectors/telegram/projectSweep.js');
-        const n = await runTelegramProjectSweep();
-        db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`ok:${n} proposals`, id);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        log.error({ name: row.name, err: msg }, 'project sweep failed');
-        db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`err:${msg}`, id);
-      }
-    })();
+  const handler = scheduleHandlers.get(row.name);
+  if (handler?.onFire) {
+    await handler.onFire({ id: row.id, catchUp: !!opts?.catchUp });
     return;
   }
 
-  const isReflection = row.name === REFLECTION_JOB;
-  let prompt: string;
-  let after: ((res: TurnResult) => void) | undefined;
-  if (isReflection) {
-    const built = buildReflectionPrompt();
-    prompt = built.prompt;
-    after = (res) => {
-      if (res.status === 'ok' && built.feedbackIds.length > 0) {
-        const marks = db.prepare(`UPDATE feedback SET status='mined' WHERE id=? AND status='new'`);
-        for (const fid of built.feedbackIds) marks.run(fid);
-      }
-    };
-  } else {
-    prompt =
-      `You are running the scheduled job "${row.name}"${opts?.catchUp ? ' (catch-up run after downtime)' : ''}. ` +
-      `Your final reply will be DM'd to Jeon — keep it brief; put anything long in the outbox.\n\n` +
-      row.prompt;
+  if (handler?.buildPrompt) {
+    const built = handler.buildPrompt();
+    enqueue(row.name, built.prompt, {
+      capMs: handler.capMs ?? cfg.hardCapMs,
+      after: built.after,
+    });
+    return;
   }
+
+  const prompt =
+    `You are running the scheduled job "${row.name}"${opts?.catchUp ? ' (catch-up run after downtime)' : ''}. ` +
+    `Your final reply will be DM'd to Jeon — keep it brief; put anything long in the outbox.\n\n` +
+    row.prompt;
   enqueue(row.name, prompt, {
-    capMs: isReflection ? cfg.reflectionCapMs : cfg.hardCapMs,
-    after,
+    capMs: handler?.capMs ?? cfg.hardCapMs,
   });
 }
 
 export function runNow(id: number): ScheduleRow {
   const row = getSchedule(id);
   if (!row) throw new Error(`schedule ${id} not found`);
-  fire(id);
+  void fire(id);
   return row;
 }
 
@@ -222,7 +197,9 @@ export function reloadSchedules(): void {
   const rows = db.prepare('SELECT * FROM schedules WHERE enabled=1').all() as unknown as ScheduleRow[];
   for (const row of rows) {
     try {
-      const c = new Cron(row.cron, { timezone: row.tz ?? cfg.tz, protect: true }, () => fire(row.id));
+      const c = new Cron(row.cron, { timezone: row.tz ?? cfg.tz, protect: true }, () => {
+        void fire(row.id);
+      });
       crons.set(row.id, c);
     } catch (e) {
       log.error({ name: row.name, err: String(e) }, 'invalid cron in schedules table');
@@ -244,7 +221,7 @@ export function catchUpMissed(): void {
       c.stop();
       if (next && next.getTime() <= Date.now()) {
         log.info({ name: row.name, missed: next.toISOString() }, 'catch-up fire');
-        fire(row.id, { catchUp: true });
+        void fire(row.id, { catchUp: true });
       }
     } catch (e) {
       log.error({ name: row.name, err: String(e) }, 'catch-up check failed');

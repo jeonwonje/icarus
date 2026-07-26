@@ -2,8 +2,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { formatHitLines, formatWindow } from '../connectors/telegram/archiveQuery.js';
 import { telegramArchiveQuery } from '../connectors/telegram/runtime.js';
-import { db, now } from '../db.js';
-import { createProposal } from '../improve/proposals.js';
+import { extraTools, getModuleHost } from '../modules/host.js';
 import {
   addSchedule,
   listSchedulesWithNextRun,
@@ -13,22 +12,29 @@ import {
   validateCron,
 } from '../scheduler/scheduler.js';
 import { sendOwner } from '../telegram/send.js';
+import { setActiveTurnContext, type TurnContext } from './turnContext.js';
 
-export interface TurnContext {
-  jid: string;
-  kind: string;
-  getSessionId: () => string | undefined;
-}
+export type { TurnContext };
 
 const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] });
 const fail = (e: unknown) => ok(`error: ${String(e instanceof Error ? e.message : e)}`);
 
 /** In-process MCP server, rebuilt per turn so tools know which conversation invoked them. */
 export function buildIcarusServer(ctx: TurnContext) {
+  setActiveTurnContext(ctx);
+  const moduleTools = extraTools(getModuleHost());
   return createSdkMcpServer({
     name: 'icarus',
     version: '1.0.0',
     tools: [
+      ...coreTools(),
+      ...moduleTools,
+    ],
+  });
+}
+
+function coreTools() {
+  return [
       tool(
         'schedule_add',
         'Create a recurring scheduled task. The prompt runs as a fresh agent session on each fire; its final reply is DMed to Jeon.',
@@ -106,50 +112,12 @@ export function buildIcarusServer(ctx: TurnContext) {
         }
       }),
       tool(
-        'record_feedback',
-        "Silently record Jeon's feedback about how Icarus works (corrections, complaints, preferences, praise). Feeds the nightly self-improvement reflection.",
-        {
-          kind: z.enum(['positive', 'negative', 'correction', 'preference']),
-          summary: z.string().describe('one-line summary of the feedback'),
-          quote: z.string().optional().describe("Jeon's words, verbatim"),
-        },
-        async (args) => {
-          db.prepare('INSERT INTO feedback(ts,kind,summary,quote,jid,session_id) VALUES(?,?,?,?,?,?)').run(
-            now(),
-            args.kind,
-            args.summary,
-            args.quote ?? null,
-            ctx.jid,
-            ctx.getSessionId() ?? null,
-          );
-          return ok('recorded');
-        },
-      ),
-      tool(
         'notify_owner',
         'DM Jeon outside the normal reply flow (job progress, alerts). Use sparingly.',
         { text: z.string() },
         async ({ text }) => {
           await sendOwner(text);
           return ok('sent');
-        },
-      ),
-      tool(
-        'propose_self_edit',
-        'Propose ONE bounded edit to persona.md or lessons.md. Requires evidence, a causal hypothesis, the COMPLETE new file content, and predicted impact. Jeon approves via DM before anything is applied.',
-        {
-          target: z.enum(['persona', 'lessons']),
-          evidence: z.string().describe('verbatim feedback / failure data justifying the change'),
-          cause: z.string().describe('causal hypothesis — why the current instructions produce the problem'),
-          new_content: z.string().describe('the complete updated file content'),
-          predicted_impact: z.string().describe('what observable behavior changes; which eval case would catch a regression'),
-        },
-        async (args) => {
-          try {
-            return ok(await createProposal(args));
-          } catch (e) {
-            return fail(e);
-          }
         },
       ),
       tool(
@@ -208,6 +176,5 @@ export function buildIcarusServer(ctx: TurnContext) {
           }
         },
       ),
-    ],
-  });
+  ];
 }
