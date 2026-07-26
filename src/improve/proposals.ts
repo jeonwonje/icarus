@@ -6,6 +6,7 @@ import { InlineKeyboard } from 'grammy';
 import { cfg, ROOT } from '../config.js';
 import { db, now } from '../db.js';
 import { log } from '../log.js';
+import { ownerVoice } from '../agent/ownerVoice.js';
 import { LESSONS_FILE, PERSONA_FILE } from '../agent/persona.js';
 import { sendOwner, sendOwnerDocument, sendOwnerKeyboard } from '../telegram/send.js';
 import { listCases, runEvals } from './evals.js';
@@ -105,23 +106,24 @@ export async function createProposal(input: {
 
   writeFileSync(path.join(cfg.proposalsDir, `${id}.diff`), diff);
 
-  const summary =
-    `Self-edit proposal #${id} (${input.target})\n\n` +
-    `Evidence: ${input.evidence}\n\n` +
-    `Cause: ${input.cause}\n\n` +
-    `Predicted impact: ${input.predicted_impact}\n\n` +
-    `Evals: ${evalSummary}`;
+  const copy = ownerVoice.proposal.selfEdit({
+    id,
+    target: input.target,
+    why: `${input.evidence}\n\n${input.cause}`,
+    whatChanges: input.predicted_impact,
+    evalSummary,
+  });
   const keyboard = new InlineKeyboard()
-    .text('Approve', `prop:${id}:approve`)
-    .text('Reject', `prop:${id}:reject`);
+    .text(copy.approveLabel, `prop:${id}:approve`)
+    .text(copy.rejectLabel, `prop:${id}:reject`);
 
   if (diff.length <= 3500) {
-    await sendOwnerKeyboard(`${summary}\n\n--- diff ---\n${diff}`, keyboard);
+    await sendOwnerKeyboard(`${copy.text}\n\n--- diff ---\n${diff}`, keyboard);
   } else {
     const diffFile = path.join(cfg.proposalsDir, `proposal-${id}.diff.md`);
     writeFileSync(diffFile, `# Proposal #${id} diff\n\n\`\`\`diff\n${diff}\n\`\`\`\n`);
-    await sendOwnerDocument(diffFile, `proposal #${id} diff`);
-    await sendOwnerKeyboard(summary, keyboard);
+    await sendOwnerDocument(diffFile, copy.diffCaption);
+    await sendOwnerKeyboard(copy.text, keyboard);
   }
   log.info({ id, target: input.target }, 'proposal created');
   return `proposal #${id} stored and sent to Jeon for approval (${evalSummary})`;

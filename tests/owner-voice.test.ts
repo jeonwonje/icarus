@@ -2,6 +2,7 @@ import './env.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ownerVoice } from '../src/agent/ownerVoice.js';
+import { renderProjectProposal } from '../src/connectors/telegram/projectUi.js';
 
 const BANNED = [
   /Evidence:/i,
@@ -46,6 +47,18 @@ test('telegramMap asks in plain English with stable callbacks', () => {
   const flat = JSON.stringify(r.keyboard.inline_keyboard);
   assert.match(flat, /tgmap:ok:3/);
   assert.match(flat, /tgmap:no:3/);
+});
+
+test('renderProjectProposal delegates to ownerVoice', () => {
+  const r = renderProjectProposal({
+    id: 9,
+    chatTitle: 'Atlas',
+    wikiProject: 'sodion-atlas',
+    evidence: 'Discusses cell testing and atlas milestones.',
+  });
+  assert.doesNotMatch(r.text, /Evidence:/);
+  assert.doesNotMatch(r.text, /Telegram\s*→\s*wiki mapping proposal/);
+  assert.match(JSON.stringify(r.keyboard.inline_keyboard), /tgmap:ok:9/);
 });
 
 test('ops and turn lines drop status-log prefixes', () => {
