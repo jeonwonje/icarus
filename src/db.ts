@@ -277,6 +277,96 @@ const MIGRATIONS: string[] = [
   `
   DROP TABLE IF EXISTS connector_state;
   `,
+  `
+  CREATE TABLE mail_exports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_sig TEXT NOT NULL UNIQUE,
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    state TEXT NOT NULL
+      CHECK(state IN ('census','ranking','triaging','done','paused','error')),
+    cursor_json TEXT,
+    total_messages INTEGER,
+    scanned_messages INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+  CREATE INDEX idx_mail_exports_state ON mail_exports(state, id);
+
+  CREATE TABLE mail_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    export_id INTEGER NOT NULL REFERENCES mail_exports(id) ON DELETE CASCADE,
+    message_key TEXT NOT NULL UNIQUE,
+    folder_path TEXT NOT NULL DEFAULT '[]',
+    folder_name TEXT NOT NULL DEFAULT '',
+    child_index INTEGER NOT NULL DEFAULT -1,
+    sent_at TEXT,
+    sender_name TEXT NOT NULL DEFAULT '',
+    sender_email TEXT NOT NULL DEFAULT '',
+    recipients TEXT NOT NULL DEFAULT '',
+    subject TEXT NOT NULL DEFAULT '',
+    attachment_count INTEGER NOT NULL DEFAULT 0,
+    md_path TEXT,
+    att_dir TEXT,
+    materialized_at TEXT,
+    state TEXT NOT NULL DEFAULT 'new'
+      CHECK(state IN ('new','ranking','ranked','queued','triaged','skipped',
+                      'rank_failed','triage_failed','materialize_failed')),
+    rank INTEGER,
+    rank_reason TEXT,
+    rank_source TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX idx_mail_messages_work ON mail_messages(state, rank DESC, sent_at DESC);
+  CREATE INDEX idx_mail_messages_export ON mail_messages(export_id, state);
+  CREATE INDEX idx_mail_messages_sender ON mail_messages(sender_email, state);
+
+  CREATE TABLE mail_senders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL DEFAULT '',
+    verdict TEXT NOT NULL CHECK(verdict IN ('relevant','sometimes','noise')),
+    why TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL CHECK(source IN ('model','owner')),
+    active INTEGER NOT NULL DEFAULT 1,
+    hits INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX idx_mail_senders_active ON mail_senders(active, verdict);
+
+  CREATE TABLE mail_filed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES mail_messages(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('attachment','document')),
+    project TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    dest_path TEXT NOT NULL,
+    sha256 TEXT,
+    reused INTEGER NOT NULL DEFAULT 0,
+    why TEXT NOT NULL DEFAULT '',
+    filed_at TEXT NOT NULL
+  );
+  CREATE INDEX idx_mail_filed_at ON mail_filed(filed_at DESC);
+
+  CREATE TABLE mail_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES mail_messages(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    project TEXT NOT NULL DEFAULT 'general',
+    why TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL,
+    UNIQUE(message_id, url)
+  );
+  CREATE INDEX idx_mail_links_project ON mail_links(project, recorded_at DESC);
+  `,
 ];
 
 export let db: DatabaseSync;

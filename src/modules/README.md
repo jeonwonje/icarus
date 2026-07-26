@@ -44,7 +44,7 @@ The explicit ordered list lives in `registry.ts` as `MODULES`. `registerAll(host
 | Calendar | `calendar` | Desktop `.mcp.json` → `mcpServers.calendar` |
 | Browser | `browser` | Desktop `.mcp.json` → `mcpServers.browser` |
 | Canvas | `canvas` | `CANVAS_BASE_URL`, `CANVAS_API_TOKEN` |
-| Mail | `mail` | `ICARUS_MAIL_DROP` |
+| Mail | `mail` | `ICARUS_MAIL_DROP` (daily `mail-sweep`; `/mail`) |
 | Improve | `improve` | persona + evals paths (always on) |
 | Memory | `memory` | `wiki/memory` path (always on) |
 | TG archive | `tg-archive` | `TG_API_ID`, `TG_API_HASH`, `TG_SESSION` |

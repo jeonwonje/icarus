@@ -78,6 +78,48 @@ export const ownerVoice = {
       return { text, keyboard };
     },
   },
+  mail: {
+    /** The runtime's own account of what it filed — never left to the model's prose. */
+    filedBlock(input: {
+      filed: { displayName: string; project: string; reused: boolean }[];
+      links: { title: string; project: string }[];
+      deadlines: { what: string; when: string }[];
+      questions: string[];
+      alerts: string[];
+    }): string {
+      const lines: string[] = [];
+      for (const d of input.deadlines) {
+        lines.push(`▸ due · ${clip(d.what, 80)}${d.when ? ` — ${d.when}` : ''}`);
+      }
+      for (const f of input.filed) {
+        lines.push(`▸ filed · ${clip(f.displayName, 60)} → ${f.project}${f.reused ? ' (already had it)' : ''}`);
+      }
+      for (const l of input.links) {
+        lines.push(`▸ link · ${clip(l.title || 'untitled', 60)} → ${l.project}`);
+      }
+      for (const q of input.questions) lines.push(`▸ ask · ${clip(q, 140)}`);
+      for (const a of input.alerts) lines.push(`▸ snag · ${clip(a, 140)}`);
+      return lines.join('\n');
+    },
+    backlog(input: { toRank: number; toRead: number }): string {
+      const bits: string[] = [];
+      if (input.toRank > 0) bits.push(`${input.toRank} still to sort`);
+      if (input.toRead > 0) bits.push(`${input.toRead} waiting to be read`);
+      return bits.length ? `▸ backlog · ${bits.join(' · ')}` : '';
+    },
+    exportPoisoned(name: string, detail: string): string {
+      return (
+        `I couldn't read ${name} — ${clipErr(detail, 160)}. ` +
+        `I've stopped retrying it; whatever I salvaged is still going through. Try /mail to retry.`
+      );
+    },
+    paused(name: string, detail: string): string {
+      return (
+        `I've paused the mail sweep on ${name} — ${clipErr(detail, 160)}. ` +
+        `Nothing is lost; tap /mail when you want me to pick it back up.`
+      );
+    },
+  },
   ops: {
     mailPipelineError(detail: string): string {
       return `Mail pipeline hit a snag: ${clipErr(detail, 300)}`;

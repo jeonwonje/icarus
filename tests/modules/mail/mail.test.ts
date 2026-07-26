@@ -2,7 +2,15 @@ import '../../env.js';
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileSignature, messageId, renderMessageMd, slugify } from '../../../src/modules/mail/watcher.js';
+import {
+  fileSignature,
+  messageId,
+  normalizeEmail,
+  renderMessageMd,
+  senderKey,
+  slugify,
+  snippetOf,
+} from '../../../src/modules/mail/message.js';
 
 test('slugify normalizes subjects', () => {
   assert.equal(slugify('Re: [CS2109] Problem Set 3!!'), 're-cs2109-problem-set-3');
@@ -46,4 +54,23 @@ test('renderMessageMd renders header and body', () => {
   assert.match(md, /date: 2026-07-19T08:00:00\.000Z/);
   assert.match(md, /id: <abc@mail\.x>/);
   assert.match(md, /\n\nSubmit by Friday\.\n$/);
+});
+
+test('snippetOf collapses whitespace and truncates', () => {
+  assert.equal(snippetOf('  hello   there\n\nworld '), 'hello there world');
+  assert.equal(snippetOf(''), '');
+  const long = snippetOf('a'.repeat(500), 10);
+  assert.equal(long.length, 10);
+  assert.ok(long.endsWith('…'));
+});
+
+test('normalizeEmail lowercases, strips angle brackets, rejects non-addresses', () => {
+  assert.equal(normalizeEmail(' <Prof.X@U.EDU> '), 'prof.x@u.edu');
+  assert.equal(normalizeEmail('Prof X'), '');
+  assert.equal(normalizeEmail(''), '');
+});
+
+test('senderKey falls back to display name when there is no address', () => {
+  assert.equal(senderKey('X@U.EDU', 'Prof X'), 'x@u.edu');
+  assert.equal(senderKey('', 'Prof X'), 'name:prof x');
 });

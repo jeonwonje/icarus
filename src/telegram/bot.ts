@@ -594,6 +594,24 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
       return;
     }
   }
+
+  // -- module callbacks (host.addCallback) ------------------------------------
+  for (const entry of getHostSnapshot().callbacks) {
+    if (!data.startsWith(entry.prefix)) continue;
+    try {
+      await entry.handler(ctx);
+    } catch (e) {
+      const text = String(e instanceof Error ? e.message : e).slice(0, 190);
+      log.error({ err: text, data }, 'module callback failed');
+      try {
+        await ctx.answerCallbackQuery({ text });
+      } catch {
+        await ctx.reply(text);
+      }
+    }
+    return;
+  }
+
   await ctx.answerCallbackQuery();
 }
 

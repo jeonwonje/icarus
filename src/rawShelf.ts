@@ -80,14 +80,23 @@ const placeBytes = (sourcePath: string, dest: string): void => {
   copyFileSync(sourcePath, dest);
 };
 
-function chooseRelPath(rawDir: string, datePrefix: string, sanitized: string, hash: string): string {
+function chooseRelPath(
+  rawDir: string,
+  datePrefix: string,
+  sanitized: string,
+  hash: string,
+  bytes: number,
+): string {
   const ext = path.extname(sanitized);
   const stem = path.basename(sanitized, ext);
   let candidate = `${datePrefix}_${sanitized}`;
   for (let i = 2; ; i++) {
     const full = path.join(rawDir, candidate);
     if (!existsSync(full)) return candidate;
-    if (hashBuffer(readFileSync(full)) === hash) return candidate;
+    // Size first: identical bytes imply identical size, so this skips the read for the
+    // common collision (same name, different content) instead of hashing the whole file.
+    // Unattended mail filing hits that case hard — bulk attachments are all "image001.png".
+    if (statSync(full).size === bytes && hashBuffer(readFileSync(full)) === hash) return candidate;
     candidate = `${datePrefix}_${stem}-${i}${ext}`;
   }
 }
@@ -128,7 +137,7 @@ export async function fileToRaw(input: FileToRawInput): Promise<FileToRawResult>
 
   const sanitized = sanitizeDisplayName(input.displayName);
   const datePrefix = calendarDate(input.now ?? new Date(), tz);
-  const relPath = chooseRelPath(rawDir, datePrefix, sanitized, hash);
+  const relPath = chooseRelPath(rawDir, datePrefix, sanitized, hash, bytes);
   const dest = path.join(rawDir, relPath);
   if (!existsSync(dest)) {
     placeBytes(input.sourcePath, dest);
