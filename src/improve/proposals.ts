@@ -1,17 +1,14 @@
-import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { InlineKeyboard } from 'grammy';
-import { cfg, ROOT } from '../config.js';
+import { cfg } from '../config.js';
 import { db, now } from '../db.js';
+import { unifiedDiff } from '../diff.js';
 import { log } from '../log.js';
 import { ownerVoice } from '../agent/ownerVoice.js';
 import { LESSONS_FILE, PERSONA_FILE } from '../agent/persona.js';
 import { sendOwner, sendOwnerDocument, sendOwnerKeyboard } from '../telegram/send.js';
 import { listCases, runEvals } from './evals.js';
-
-const exec = promisify(execFile);
 
 export interface ProposalRow {
   id: number;
@@ -23,36 +20,33 @@ export interface ProposalRow {
   new_content: string;
   predicted_impact: string;
   status: string;
-  commit_sha: string | null;
+  commit_sha: string | null; // persona_versions ref ('v<id>'); column name predates the git removal
   eval_summary: string | null;
 }
 
-async function git(...args: string[]): Promise<string> {
-  const { stdout } = await exec('git', args, { cwd: ROOT });
-  return stdout.trim();
+interface PersonaVersionRow {
+  id: number;
+  created_at: string;
+  label: string;
+  persona: string;
+  lessons: string;
 }
 
 const targetFile = (target: 'persona' | 'lessons') =>
   target === 'persona' ? PERSONA_FILE : LESSONS_FILE;
 
-/** Unified diff via `git diff --no-index` (exits 1 when files differ — that's success here). */
-async function computeDiff(current: string, candidate: string, label: string): Promise<string> {
-  mkdirSync(cfg.proposalsDir, { recursive: true });
-  const a = path.join(cfg.proposalsDir, `.tmp-a-${label}`);
-  const b = path.join(cfg.proposalsDir, `.tmp-b-${label}`);
-  writeFileSync(a, current);
-  writeFileSync(b, candidate);
-  try {
-    await exec('git', ['diff', '--no-index', '--unified=3', '--', a, b], { cwd: ROOT });
-    return ''; // exit 0 = identical
-  } catch (e) {
-    const out = (e as { stdout?: string }).stdout ?? '';
-    // Strip the tmp-file header noise down to the hunks.
-    return out.split('\n').filter((l) => !l.startsWith('diff --git') && !l.startsWith('index ')).join('\n');
-  } finally {
-    rmSync(a, { force: true });
-    rmSync(b, { force: true });
-  }
+/** Store the current persona+lessons files as a new immutable version. Returns 'v<id>'. */
+function snapshotPersona(label: string): string {
+  const info = db
+    .prepare(`INSERT INTO persona_versions(created_at,label,persona,lessons) VALUES(?,?,?,?)`)
+    .run(now(), label, readFileSync(PERSONA_FILE, 'utf8'), readFileSync(LESSONS_FILE, 'utf8'));
+  return `v${info.lastInsertRowid}`;
+}
+
+function latestVersion(): PersonaVersionRow | undefined {
+  return db
+    .prepare(`SELECT * FROM persona_versions ORDER BY id DESC LIMIT 1`)
+    .get() as unknown as PersonaVersionRow | undefined;
 }
 
 export function getProposal(id: number): ProposalRow | undefined {
@@ -80,7 +74,7 @@ export async function createProposal(input: {
   if (current === input.new_content) return 'rejected: new_content is identical to the current file';
   if (latestPending()) return 'rejected: a proposal is already awaiting approval — one at a time';
 
-  const diff = await computeDiff(current, input.new_content, input.target);
+  const diff = unifiedDiff(current, input.new_content);
   const info = db
     .prepare(
       `INSERT INTO proposals(created_at,target,evidence,cause,diff,new_content,predicted_impact,status)
@@ -104,6 +98,7 @@ export async function createProposal(input: {
   }
   db.prepare('UPDATE proposals SET eval_summary=? WHERE id=?').run(evalSummary, id);
 
+  mkdirSync(cfg.proposalsDir, { recursive: true });
   writeFileSync(path.join(cfg.proposalsDir, `${id}.diff`), diff);
 
   const copy = ownerVoice.proposal.selfEdit({
@@ -136,14 +131,12 @@ export async function approveProposal(id: number): Promise<string> {
 
   writeFileSync(targetFile(row.target), row.new_content);
   const slug = row.cause.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
-  await git('add', 'persona');
-  await git('commit', '-m', `persona: ${slug || 'update'} (proposal #${id})`);
-  const sha = await git('rev-parse', '--short', 'HEAD');
+  const ref = snapshotPersona(`${slug || 'update'} (proposal #${id})`);
 
-  db.prepare(`UPDATE proposals SET status='approved', commit_sha=? WHERE id=?`).run(sha, id);
+  db.prepare(`UPDATE proposals SET status='approved', commit_sha=? WHERE id=?`).run(ref, id);
   db.prepare(`UPDATE feedback SET status='addressed', proposal_id=? WHERE status='mined'`).run(id);
-  log.info({ id, sha }, 'proposal approved');
-  return `applied as ${sha} — takes effect next turn. /revert if it misbehaves.`;
+  log.info({ id, ref }, 'proposal approved');
+  return `applied as ${ref} — takes effect next turn. /revert if it misbehaves.`;
 }
 
 export function rejectProposal(id: number): string {
@@ -155,35 +148,26 @@ export function rejectProposal(id: number): string {
   return `proposal #${id} rejected — future reflections will see this and not re-propose it.`;
 }
 
-export async function listPersonaCommits(n = 5): Promise<{ sha: string; msg: string }[]> {
-  try {
-    const out = await git('log', '--oneline', `-${n}`, '--', 'persona');
-    return out
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const [sha, ...rest] = line.split(' ');
-        return { sha, msg: rest.join(' ') };
-      });
-  } catch {
-    return [];
-  }
+export function listPersonaVersions(n = 5): { ref: string; label: string }[] {
+  const rows = db
+    .prepare(`SELECT id, label FROM persona_versions ORDER BY id DESC LIMIT ?`)
+    .all(n) as unknown as { id: number; label: string }[];
+  return rows.map((r) => ({ ref: `v${r.id}`, label: r.label }));
 }
 
-export async function revertCommit(sha: string): Promise<string> {
-  try {
-    await git('revert', '--no-edit', sha);
-    db.prepare(`UPDATE proposals SET status='reverted' WHERE commit_sha=?`).run(sha);
-    const head = await git('rev-parse', '--short', 'HEAD');
-    return `reverted ${sha} (new commit ${head}) — takes effect next turn.`;
-  } catch (e) {
-    try {
-      await git('revert', '--abort');
-    } catch {
-      /* nothing to abort */
-    }
-    return `revert of ${sha} failed: ${String(e).slice(0, 300)}`;
-  }
+/** Restore persona+lessons to the state stored as <ref>; the restore is itself a new version. */
+export function revertToVersion(ref: string): string {
+  const id = Number(ref.replace(/^v/, ''));
+  if (!Number.isInteger(id) || id <= 0) return `bad version ref: ${ref}`;
+  const row = db.prepare('SELECT * FROM persona_versions WHERE id=?').get(id) as unknown as
+    | PersonaVersionRow
+    | undefined;
+  if (!row) return `version ${ref} not found`;
+  writeFileSync(PERSONA_FILE, row.persona);
+  writeFileSync(LESSONS_FILE, row.lessons);
+  const newRef = snapshotPersona(`revert to ${ref} (${row.label})`);
+  db.prepare(`UPDATE proposals SET status='reverted' WHERE commit_sha=?`).run(ref);
+  return `restored ${ref} as ${newRef} — takes effect next turn.`;
 }
 
 /** Wire the approve/reject decision from a callback query or command. */
@@ -191,13 +175,14 @@ export async function decideProposal(id: number, decision: 'approve' | 'reject')
   return decision === 'approve' ? approveProposal(id) : rejectProposal(id);
 }
 
-export async function ensurePersonaCommitted(): Promise<void> {
-  // First run: make sure persona files are in git so revert always has a base.
-  try {
-    await git('add', 'persona');
-    const staged = await git('diff', '--cached', '--name-only');
-    if (staged) await git('commit', '-m', 'persona: baseline');
-  } catch (e) {
-    log.warn({ err: String(e) }, 'persona baseline commit failed (set git user.name/email?)');
+/** First run: baseline the persona files. Later runs: snapshot hand-edits so history stays complete. */
+export function ensurePersonaBaseline(): void {
+  const latest = latestVersion();
+  if (!latest) {
+    snapshotPersona('baseline');
+    return;
   }
+  const persona = readFileSync(PERSONA_FILE, 'utf8');
+  const lessons = readFileSync(LESSONS_FILE, 'utf8');
+  if (persona !== latest.persona || lessons !== latest.lessons) snapshotPersona('hand edit (boot)');
 }

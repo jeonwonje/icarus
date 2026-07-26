@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
@@ -12,6 +13,15 @@ const PROTECTED_FILES = [
 ];
 const PROTECTED_DIRS = [norm(path.join(os.homedir(), '.claude'))];
 
+// The raw archive: filed files are frozen. New files may be created (that's filing);
+// existing ones are never edited in place. artifacts\ is the one writable pocket.
+const RAW_ROOTS = [
+  norm(path.join(cfg.desktopDir, '1_Projects')),
+  norm(path.join(cfg.desktopDir, '2_Academic')),
+  norm(path.join(cfg.desktopDir, '3_General')),
+];
+const ARTIFACTS_DIR = norm(cfg.artifactsDir);
+
 // Reflection's write surface: persona files, new eval cases, and scratch space.
 const REFLECTION_WRITABLE = [
   norm(cfg.personaDir),
@@ -22,8 +32,8 @@ const REFLECTION_WRITABLE = [
 
 const BASH_DENY: { re: RegExp; reason: string }[] = [
   {
-    re: /(rm\s+(-\w*r\w*f|\-\w*f\w*r)\w*|remove-item\s+[^|;]*-recurse)[^|;]*(wiki|\.claude)/i,
-    reason: 'recursive delete touching the wiki or ~/.claude is not allowed',
+    re: /(rm\s+(-\w*r\w*f|\-\w*f\w*r)\w*|remove-item\s+[^|;]*-recurse)[^|;]*(wiki|\.claude|0_Inbox|1_Projects|2_Academic|3_General)/i,
+    reason: 'recursive delete touching the wiki, ~/.claude, or the raw archive is not allowed',
   },
   { re: /\bshutdown\b/i, reason: 'shutting down the machine is not allowed' },
   { re: /\bformat(\.com)?\s+\w:/i, reason: 'formatting drives is not allowed' },
@@ -36,6 +46,8 @@ function checkFilePath(fp: string, kind: string): string | null {
   if (PROTECTED_FILES.includes(p)) return `${fp} is owner-managed; Icarus never edits it`;
   if (PROTECTED_DIRS.some((d) => inDir(p, d)))
     return 'nothing under ~/.claude may be written (creating a global CLAUDE.md included)';
+  if (RAW_ROOTS.some((d) => inDir(p, d)) && !inDir(p, ARTIFACTS_DIR) && existsSync(fp))
+    return 'raw archive files are immutable once filed — write a new file beside it (the old one stays as the superseded version)';
   if (kind === `job:${REFLECTION_JOB}`) {
     if (!REFLECTION_WRITABLE.some((d) => inDir(p, d)))
       return 'the reflection job may only write persona files, eval cases, and scratch space — use propose_self_edit for persona changes';

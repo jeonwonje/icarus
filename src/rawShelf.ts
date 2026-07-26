@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { cfg } from './config.js';
+import { rawTargets } from './rawProjects.js';
 import type { RawShelfStore } from './rawShelfStore.js';
 
 export interface FileToRawInput {
@@ -91,22 +92,27 @@ function chooseRelPath(rawDir: string, datePrefix: string, sanitized: string, ha
   }
 }
 
-/** Shelves source bytes under Desktop/<project>/raw/ with sha256 dedup. */
+/**
+ * Files source bytes into the raw archive with sha256 dedup — 1_Projects\<slug>\raw\ for
+ * projects, the category folder itself for `academic`/`general`. Files are placed once and
+ * never overwritten; a same-name-different-bytes arrival gets a disambiguated name, so
+ * superseded versions stay archived in place.
+ */
 export async function fileToRaw(input: FileToRawInput): Promise<FileToRawResult> {
   const project = input.project.trim();
   if (!project) throw new Error('project slug is required');
 
   const desktopDir = input.desktopDir ?? cfg.desktopDir;
   const tz = input.tz ?? cfg.tz;
-  const projectDir = path.join(desktopDir, project);
-  if (!existsSync(projectDir) || !statSync(projectDir).isDirectory()) {
-    throw new Error(`Desktop project folder missing: ${projectDir}`);
+  const targets = rawTargets(desktopDir);
+  const rawDir = targets[project];
+  if (!rawDir) {
+    throw new Error(`shelf target missing: ${project} (valid: ${Object.keys(targets).join(', ')})`);
   }
   if (!existsSync(input.sourcePath)) {
     throw new Error(`source file missing: ${input.sourcePath}`);
   }
 
-  const rawDir = path.join(projectDir, 'raw');
   mkdirSync(rawDir, { recursive: true });
 
   const hash = await hashFile(input.sourcePath);

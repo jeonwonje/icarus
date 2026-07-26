@@ -26,8 +26,8 @@ export interface SavedFile {
 }
 
 /**
- * Download the message's media into inbox\<date>\. Returns null if the message has no media.
- * Throws with a readable message on Bot API limits (20 MB download cap).
+ * Download the message's media into 0_Inbox\ (flat, date-prefixed). Returns null if the
+ * message has no media. Throws with a readable message on Bot API limits (20 MB download cap).
  */
 export async function saveIncomingFile(ctx: Context): Promise<SavedFile | null> {
   const m = ctx.message;
@@ -37,10 +37,10 @@ export async function saveIncomingFile(ctx: Context): Promise<SavedFile | null> 
   if (!file.file_path) throw new Error('Telegram returned no file_path');
 
   const day = new Date().toISOString().slice(0, 10);
-  const dir = path.join(cfg.inboxDir, day);
+  const dir = cfg.inboxDir;
   mkdirSync(dir, { recursive: true });
 
-  let name = pickName(ctx);
+  let name = `${day}_${pickName(ctx)}`;
   let dest = path.join(dir, name);
   for (let i = 1; existsSync(dest); i++) {
     const ext = path.extname(name);

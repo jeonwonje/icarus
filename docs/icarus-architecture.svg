@@ -1,0 +1,211 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 920" width="1280" height="920" role="img" aria-labelledby="title desc">
+  <title id="title">Icarus architecture - data flows</title>
+  <desc id="desc">Overview of Icarus: Telegram DM and connectors feed a single queue; Claude Agent SDK runs on Desktop; replies and files return to Telegram; persona edits go through approve and SQLite snapshots.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6570"/>
+    </marker>
+    <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f6fed"/>
+    </marker>
+    <marker id="arrowWarm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c45c26"/>
+    </marker>
+    <filter id="soft" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-opacity="0.12"/>
+    </filter>
+    <style type="text/css"><![CDATA[
+      .bg { fill: #f7f5f1; }
+      .title { font: 700 28px "Segoe UI", system-ui, sans-serif; fill: #1a1f24; }
+      .subtitle { font: 400 14px "Segoe UI", system-ui, sans-serif; fill: #5a6570; }
+      .section { font: 700 12px "Segoe UI", system-ui, sans-serif; fill: #5a6570; letter-spacing: 0.06em; }
+      .box-title { font: 650 15px "Segoe UI", system-ui, sans-serif; fill: #1a1f24; }
+      .box-body { font: 400 12px "Segoe UI", system-ui, sans-serif; fill: #3d4650; }
+      .tiny { font: 400 11px "Segoe UI", system-ui, sans-serif; fill: #6b7580; }
+      .label { font: 600 11px "Segoe UI", system-ui, sans-serif; fill: #5a6570; }
+      .panel { fill: #ffffff; stroke: #d8dde3; stroke-width: 1.25; rx: 10; }
+      .panel-in { fill: #eef6ff; stroke: #b8d0f0; stroke-width: 1.25; rx: 10; }
+      .panel-core { fill: #fffaf3; stroke: #e8d4b8; stroke-width: 1.5; rx: 12; }
+      .panel-out { fill: #f0faf3; stroke: #b7dfc4; stroke-width: 1.25; rx: 10; }
+      .panel-side { fill: #faf7ff; stroke: #d4c8e8; stroke-width: 1.25; rx: 10; }
+      .chip { fill: #ffffff; stroke: #c9d0d8; stroke-width: 1; rx: 6; }
+      .flow { fill: none; stroke: #5a6570; stroke-width: 1.6; marker-end: url(#arrow); }
+      .flow-accent { fill: none; stroke: #2f6fed; stroke-width: 1.8; marker-end: url(#arrowAccent); }
+      .flow-warm { fill: none; stroke: #c45c26; stroke-width: 1.6; marker-end: url(#arrowWarm); }
+      .flow-dash { fill: none; stroke: #8a94a0; stroke-width: 1.3; stroke-dasharray: 4 3; marker-end: url(#arrow); }
+      .legend-swatch { stroke-width: 1; rx: 3; }
+    ]]></style>
+  </defs>
+
+  <rect class="bg" width="1280" height="920"/>
+
+  <text class="title" x="48" y="48">Icarus</text>
+  <text class="subtitle" x="48" y="72">Telegram-fronted, single-lane Claude Code host on your machine</text>
+  <text class="tiny" x="48" y="92">One Node process / SQLite state / Desktop as cwd / owner DM only</text>
+
+  <g transform="translate(820, 28)">
+    <rect class="panel" x="0" y="0" width="412" height="72" filter="url(#soft)"/>
+    <text class="section" x="16" y="22">LEGEND</text>
+    <rect class="legend-swatch" x="16" y="36" width="14" height="14" fill="#eef6ff" stroke="#b8d0f0"/>
+    <text class="tiny" x="36" y="47">Inputs</text>
+    <rect class="legend-swatch" x="96" y="36" width="14" height="14" fill="#fffaf3" stroke="#e8d4b8"/>
+    <text class="tiny" x="116" y="47">Core</text>
+    <rect class="legend-swatch" x="166" y="36" width="14" height="14" fill="#f0faf3" stroke="#b7dfc4"/>
+    <text class="tiny" x="186" y="47">Outputs</text>
+    <rect class="legend-swatch" x="256" y="36" width="14" height="14" fill="#faf7ff" stroke="#d4c8e8"/>
+    <text class="tiny" x="276" y="47">Side channels</text>
+  </g>
+
+  <rect class="panel" x="48" y="112" width="1184" height="56" filter="url(#soft)"/>
+  <text class="section" x="64" y="136">SUPERVISOR</text>
+  <text class="box-body" x="64" y="156">Windows Task Scheduler -&gt; run-icarus.cmd (forever loop) -&gt; tsx src/main.ts / crash or /restart -&gt; re-exec / logs -&gt; state/logs/</text>
+
+  <g transform="translate(48, 192)">
+    <text class="section" x="0" y="0">INPUTS</text>
+
+    <rect class="panel-in" x="0" y="16" width="220" height="200" filter="url(#soft)"/>
+    <text class="box-title" x="16" y="42">Telegram DM</text>
+    <text class="box-body" x="16" y="64">grammY long-poll</text>
+    <text class="tiny" x="16" y="84">owner ACL only</text>
+    <rect class="chip" x="16" y="98" width="188" height="28"/>
+    <text class="box-body" x="26" y="117">text -&gt; submitOwnerText</text>
+    <rect class="chip" x="16" y="134" width="188" height="28"/>
+    <text class="box-body" x="26" y="153">files -&gt; Desktop/0_Inbox/</text>
+    <rect class="chip" x="16" y="170" width="188" height="28"/>
+    <text class="box-body" x="26" y="189">callbacks / slash cmds</text>
+
+    <rect class="panel-in" x="236" y="16" width="220" height="200" filter="url(#soft)"/>
+    <text class="box-title" x="252" y="42">Connectors</text>
+    <text class="box-body" x="252" y="64">enqueue as job:name</text>
+    <rect class="chip" x="252" y="80" width="188" height="26"/>
+    <text class="box-body" x="262" y="98">Schedules (Croner)</text>
+    <rect class="chip" x="252" y="112" width="188" height="26"/>
+    <text class="box-body" x="262" y="130">Mail PST -&gt; triage</text>
+    <rect class="chip" x="252" y="144" width="188" height="26"/>
+    <text class="box-body" x="262" y="162">Canvas 08:00 / 18:00</text>
+    <rect class="chip" x="252" y="176" width="188" height="26"/>
+    <text class="box-body" x="262" y="194">Personal TG archive</text>
+  </g>
+
+  <path class="flow-accent" d="M 268 412 L 268 448"/>
+  <path class="flow-accent" d="M 394 412 L 394 430 L 520 430 L 520 448"/>
+  <text class="label" x="280" y="440">enqueue turns</text>
+
+  <g transform="translate(48, 456)">
+    <text class="section" x="0" y="0">CORE PIPELINE (single global lane)</text>
+
+    <rect class="panel-core" x="0" y="16" width="200" height="168" filter="url(#soft)"/>
+    <text class="box-title" x="16" y="42">Queue</text>
+    <text class="tiny" x="16" y="60">src/queue.ts</text>
+    <text class="box-body" x="16" y="84">one runner at a time</text>
+    <text class="box-body" x="16" y="104">coalesce same jid</text>
+    <text class="box-body" x="16" y="124">owner jumps ahead</text>
+    <text class="box-body" x="16" y="144">/stop aborts turn</text>
+    <text class="tiny" x="16" y="168">jid: dm:owner | job:*</text>
+
+    <rect class="panel-core" x="236" y="16" width="280" height="168" filter="url(#soft)"/>
+    <text class="box-title" x="252" y="42">Claude Agent SDK</text>
+    <text class="tiny" x="252" y="60">src/agent/runner.ts / query()</text>
+    <text class="box-body" x="252" y="84">cwd = Desktop hub</text>
+    <text class="box-body" x="252" y="104">resume session (owner only)</text>
+    <text class="box-body" x="252" y="124">bypassPermissions + guard</text>
+    <text class="box-body" x="252" y="144">MCP: schedules, feedback,</text>
+    <text class="box-body" x="252" y="162">propose_self_edit, archive...</text>
+
+    <rect class="panel-core" x="552" y="16" width="260" height="168" filter="url(#soft)"/>
+    <text class="box-title" x="568" y="42">Per-turn context</text>
+    <text class="tiny" x="568" y="60">persona + UserPromptSubmit</text>
+    <text class="box-body" x="568" y="84">persona.md + lessons.md</text>
+    <text class="box-body" x="568" y="104">memory index (wiki/memory)</text>
+    <text class="box-body" x="568" y="124">new inbox / schedules</text>
+    <text class="box-body" x="568" y="144">outbox/artifacts paths</text>
+    <text class="box-body" x="568" y="164">pending proposals / turns</text>
+  </g>
+
+  <path class="flow-accent" d="M 248 540 L 284 540"/>
+  <path class="flow-accent" d="M 516 540 L 552 540"/>
+
+  <path class="flow" d="M 376 640 L 376 688"/>
+  <text class="label" x="386" y="672">stream + files</text>
+
+  <g transform="translate(860, 192)">
+    <text class="section" x="0" y="0">STATE AND DISK</text>
+    <rect class="panel" x="0" y="16" width="324" height="400" filter="url(#soft)"/>
+    <text class="box-title" x="16" y="42">SQLite / state/icarus.db</text>
+    <text class="tiny" x="16" y="60">src/db.ts migrations</text>
+    <text class="box-body" x="16" y="84">sessions / turns / schedules</text>
+    <text class="box-body" x="16" y="104">feedback / proposals / evals</text>
+    <text class="box-body" x="16" y="124">connector_* / raw_shelf</text>
+    <text class="box-body" x="16" y="144">tg_* archive tables</text>
+
+    <line x1="16" y1="164" x2="308" y2="164" stroke="#e2e6ea" stroke-width="1"/>
+
+    <text class="box-title" x="16" y="190">Data root (Desktop) + runtime</text>
+    <rect class="chip" x="16" y="204" width="140" height="28"/>
+    <text class="box-body" x="26" y="223">0_Inbox/</text>
+    <rect class="chip" x="168" y="204" width="140" height="28"/>
+    <text class="box-body" x="178" y="223">outbox/</text>
+    <rect class="chip" x="16" y="240" width="140" height="28"/>
+    <text class="box-body" x="26" y="259">1..3_ raw (frozen)</text>
+    <rect class="chip" x="168" y="240" width="140" height="28"/>
+    <text class="box-body" x="178" y="259">archive/ (icarus)</text>
+    <rect class="chip" x="16" y="276" width="292" height="28"/>
+    <text class="box-body" x="26" y="295">state/ / logs / shutdown marker</text>
+
+    <line x1="16" y1="320" x2="308" y2="320" stroke="#e2e6ea" stroke-width="1"/>
+
+    <text class="box-title" x="16" y="346">Guard hook</text>
+    <text class="tiny" x="16" y="364">src/agent/guard.ts / PreToolUse</text>
+    <text class="box-body" x="16" y="386">deny CLAUDE.md / ~/.claude / raw overwrite</text>
+    <text class="box-body" x="16" y="404">dangerous bash / reflection write limit</text>
+  </g>
+
+  <path class="flow-dash" d="M 860 540 L 812 540"/>
+  <text class="label" x="820" y="528">persist</text>
+
+  <g transform="translate(48, 696)">
+    <text class="section" x="0" y="0">OUTPUTS</text>
+
+    <rect class="panel-out" x="0" y="16" width="240" height="140" filter="url(#soft)"/>
+    <text class="box-title" x="16" y="42">Telegram owner DM</text>
+    <text class="box-body" x="16" y="66">streamed chat (&lt;=4000)</text>
+    <text class="box-body" x="16" y="86">job / digest results</text>
+    <text class="box-body" x="16" y="106">outbox docs -&gt; sendDocument</text>
+    <text class="box-body" x="16" y="126">proposal Approve / Reject UI</text>
+
+    <rect class="panel-out" x="256" y="16" width="240" height="140" filter="url(#soft)"/>
+    <text class="box-title" x="272" y="42">Desktop / wiki</text>
+    <text class="box-body" x="272" y="66">agent tools write files</text>
+    <text class="box-body" x="272" y="86">wiki/memory consolidation</text>
+    <text class="box-body" x="272" y="106">raw shelf -&gt; 1_Projects/&lt;p&gt;/raw/</text>
+    <text class="box-body" x="272" y="126">3_General/artifacts/ re-renderables</text>
+
+    <rect class="panel-out" x="512" y="16" width="240" height="140" filter="url(#soft)"/>
+    <text class="box-title" x="528" y="42">Outbox drain</text>
+    <text class="tiny" x="528" y="60">after every turn</text>
+    <text class="box-body" x="528" y="84">outbox/jid/ -&gt; Telegram</text>
+    <text class="box-body" x="528" y="104">optional .caption sidecars</text>
+    <text class="box-body" x="528" y="124">-&gt; _delivered/ (keep 20)</text>
+  </g>
+
+  <path class="flow" d="M 280 640 L 168 696"/>
+  <path class="flow" d="M 376 640 L 376 696"/>
+  <path class="flow" d="M 470 640 L 632 696"/>
+
+  <g transform="translate(800, 696)">
+    <text class="section" x="0" y="0">SELF-IMPROVE LOOP</text>
+    <rect class="panel-side" x="0" y="16" width="384" height="140" filter="url(#soft)"/>
+    <text class="box-title" x="16" y="42">Persona via approval + snapshots</text>
+    <text class="box-body" x="16" y="66">1. feedback / nightly reflection 03:30</text>
+    <text class="box-body" x="16" y="86">2. propose_self_edit -&gt; evals -&gt; DM UI</text>
+    <text class="box-body" x="16" y="106">3. Approve -&gt; write persona + snapshot vN</text>
+    <text class="box-body" x="16" y="126">4. /revert -&gt; restore a snapshot (SQLite)</text>
+  </g>
+
+  <path class="flow-warm" d="M 752 766 L 800 766"/>
+  <text class="label" x="758" y="756" fill="#c45c26">approve</text>
+
+  <text class="tiny" x="48" y="880">Primary path: DM/connectors -&gt; queue -&gt; Claude (Desktop) -&gt; DM + outbox. Persona never auto-writes - only Approve -&gt; snapshot. Slash cmds mostly stay in the bot; /restart exits clean for the supervisor loop.</text>
+  <text class="tiny" x="48" y="900">Key files: src/main.ts / queue.ts / agent/runner.ts / telegram/bot.ts / outbox.ts / improve/proposals.ts / agent/guard.ts / persona/</text>
+</svg>

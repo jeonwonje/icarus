@@ -31,7 +31,7 @@ test('raw_shelf store upserts and gets by project+sha', () => {
 test('fileToRaw shelves, dedups by hash, and disambiguates names', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'raw-shelf-'));
   const desktop = path.join(root, 'Desktop');
-  const project = path.join(desktop, 'morianlabs');
+  const project = path.join(desktop, '1_Projects', 'morianlabs');
   mkdirSync(project, { recursive: true });
   const src = path.join(root, 'inbox-quote.pdf');
   writeFileSync(src, 'vendor quote v1');
@@ -86,7 +86,7 @@ test('fileToRaw shelves, dedups by hash, and disambiguates names', async () => {
 test('fileToRaw refuses missing project or source', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'raw-shelf-miss-'));
   const desktop = path.join(root, 'Desktop');
-  mkdirSync(desktop, { recursive: true });
+  mkdirSync(path.join(desktop, '1_Projects'), { recursive: true });
   const db = new DatabaseSync(':memory:');
   migrateDb(db);
   const store = new RawShelfStore(db);

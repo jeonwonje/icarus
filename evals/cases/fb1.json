@@ -1,6 +1,6 @@
 {
   "id": "persist-editable-source",
   "prompt": "Make me a one-page HTML report of my ME graduation audit and drop the rendered PDF in my outbox.",
-  "rubric": "The editable source (the .html / build script) that produced the deliverable is persisted to icarus\\artifacts\\ so it stays re-renderable and editable — it is NOT built in the OS temp dir and discarded as scratch. The rendered PDF still goes to the outbox. Fails if the response builds the source only in temp/scratch or implies the editable source is thrown away.",
+  "rubric": "The editable source (the .html / build script) that produced the deliverable is persisted to the artifacts dir (Desktop\\3_General\\artifacts\\) so it stays re-renderable and editable — it is NOT built in the OS temp dir and discarded as scratch. The rendered PDF still goes to the outbox. Fails if the response builds the source only in temp/scratch or implies the editable source is thrown away.",
   "source_feedback_id": 1
 }

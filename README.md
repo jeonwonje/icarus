@@ -14,15 +14,16 @@ and my rules loaded.
 
 - **Chat with my files.** It works from my Desktop hub, so "summarize that datasheet" or
   "update the wiki page on X" just works.
-- **Take files.** Anything I send in the DM lands in an inbox. One tap decides: ingest it
-  into the wiki, summarize it first, or just keep it.
+- **Take files.** Anything I send in the DM lands in `Desktop\0_Inbox`. One tap decides:
+  file it into the raw archive and ingest it into the wiki, summarize it first, or just
+  keep it.
 - **Run things on a schedule.** "Every weekday at 8am, summarize new inbox files" — it
   creates the job itself. Results arrive as DMs. Missed runs (laptop asleep) can catch up
   once on boot.
 - **Improve itself.** Corrections I make get logged. Every night it reflects on them and
   may propose *one* small edit to its own instructions — with evidence, a diff, and a
-  pass/fail check against a small test set. I tap Approve or Reject. Every change is a git
-  commit, so `/revert` undoes it.
+  pass/fail check against a small test set. I tap Approve or Reject. Every change is a
+  stored snapshot in SQLite, so `/revert` undoes it — the persona flow does not use git.
 - **Stay alive.** Auto-starts at logon, restarts itself if it crashes, DMs me if its
   Claude token dies.
 
@@ -47,7 +48,7 @@ You need Node 24+, git, and a Claude subscription.
 1. Make a bot: DM **@BotFather** → `/newbot` → copy the token.
 2. Get your own Telegram user id: DM **@userinfobot**.
 3. Get a Claude token: run `claude setup-token` in a terminal.
-4. `git clone` this repo, then inside it:
+4. `git clone` this repo (it lives at `Desktop\icarus`), then inside it:
    ```
    copy .env.example .env     ← paste the three values in
    npm install
@@ -97,8 +98,8 @@ On a real Windows checkout with credentials:
 8. Trigger simultaneous bursts in both chats; verify separate triage turns.
 9. Verify an unselected chat has no message rows, link rows, media rows, or blobs.
 
-Record observed counts and any Telegram-side permanent failures in the handoff; do not put
-private chat content in git.
+Record observed counts and any Telegram-side permanent failures in the handoff; never put
+private chat content in the docs.
 
 #### Troubleshooting
 
@@ -129,8 +130,12 @@ src\            the code (TypeScript, tsx, no build step)
 persona\        its operating instructions — the only files it may edit itself
 evals\cases\    tiny regression tests for the persona (npm run evals)
 scripts\        supervisor loop + Task Scheduler registration
-inbox\ outbox\ artifacts\ state\   runtime data — gitignored, stays on the machine
+state\ archive\ runtime data (SQLite, logs, telegram archive) — stays on the machine
 ```
 
-`.env` (secrets) and all runtime data are gitignored. This repo is code and instructions
-only — no conversations, no files, no keys.
+The data it manages lives on the Desktop, not in here: `0_Inbox\` (arrivals), the raw
+archive (`1_Projects\`, `2_Academic\`, `3_General\` — filed once, then frozen), `wiki\`,
+`index.md`, `log.md`, and `outbox\<thread>\` for deliveries. **This repo is the only git
+on the machine, and it holds code and instructions only** — the data root, secrets, and
+runtime state are never committed. Persona history lives in SQLite snapshots; the wiki's
+only history is its frontmatter dates.

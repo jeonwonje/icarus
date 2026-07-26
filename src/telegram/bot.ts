@@ -1,8 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { existsSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { cfg, MODEL_ALIASES, OWNER_JID, resolveModel, ROOT } from '../config.js';
 import { formatCanvasStatusLine } from '../connectors/canvas.js';
@@ -28,7 +26,7 @@ import { log } from '../log.js';
 import { clearPending, hasPending, queueStatus, submitTurn, abortRunning } from '../queue.js';
 import { ownerVoice } from '../agent/ownerVoice.js';
 import { clearSession, getSession } from '../agent/sessions.js';
-import { decideProposal, latestPending, listPersonaCommits, revertCommit } from '../improve/proposals.js';
+import { decideProposal, latestPending, listPersonaVersions, revertToVersion } from '../improve/proposals.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
 import { listShelvableProjects } from '../rawProjects.js';
 import { blobPathForHash, fileToRaw } from '../rawShelf.js';
@@ -49,7 +47,6 @@ import {
   type Rendered,
 } from './ui.js';
 
-const exec = promisify(execFile);
 const bootedAt = Date.now();
 
 let typingStop: (() => void) | null = null;
@@ -108,9 +105,10 @@ async function statusText(): Promise<string> {
   const up = Math.floor((Date.now() - bootedAt) / 60000);
   let head = 'n/a';
   try {
-    head = (await exec('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT })).stdout.trim();
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version?: string };
+    head = `v${pkg.version ?? '?'}`;
   } catch {
-    /* fresh repo */
+    /* unreadable package.json */
   }
   const model = getSetting('model') ?? cfg.defaultModel;
   const session = getSession(OWNER_JID);
@@ -214,7 +212,7 @@ async function shelfAndIngestArchiveMedia(
     });
     submitOwnerText(
       `Ingest this file into the wiki using the deep-ingest skill: ${shelved.path}\n` +
-        `It is already filed under Desktop\\${project}\\raw\\.\n` +
+        `It is already filed in the raw archive (immutable) — cite that locator on the src- page.\n` +
         `Telegram provenance: ${hit.peerKey}#${hit.messageId}\n` +
         `blob:sha256:${media.blobHash}`,
     );
@@ -256,7 +254,7 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
   // -- persona revert -----------------------------------------------------
   if (data.startsWith('revert:')) {
     await ctx.answerCallbackQuery();
-    await ctx.reply(await revertCommit(data.slice(7)));
+    await ctx.reply(revertToVersion(data.slice(7)));
     return;
   }
   // -- status -------------------------------------------------------------
@@ -336,7 +334,7 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
       });
       submitOwnerText(
         `Ingest this file into the wiki using the deep-ingest skill: ${shelved.path}\n` +
-          `It is already filed under Desktop\\${project}\\raw\\. Cite that locator on the src- page.`,
+          `It is already filed in the raw archive (immutable). Cite that locator on the src- page.`,
       );
     } catch (e) {
       await editTo(ctx, {
@@ -724,11 +722,11 @@ export function createBot(): Bot {
   });
 
   bot.command('revert', async (ctx) => {
-    const commits = await listPersonaCommits(5);
-    if (commits.length === 0) return ctx.reply('no persona commits to revert.');
+    const versions = listPersonaVersions(5);
+    if (versions.length === 0) return ctx.reply('no persona versions to restore.');
     const kb = new InlineKeyboard();
-    for (const c of commits) kb.text(`${c.sha} ${c.msg.slice(0, 30)}`, `revert:${c.sha}`).row();
-    await ctx.reply('revert which persona commit?', { reply_markup: kb });
+    for (const v of versions) kb.text(`${v.ref} ${v.label.slice(0, 30)}`, `revert:${v.ref}`).row();
+    await ctx.reply('restore which persona version?', { reply_markup: kb });
   });
 
   bot.command('restart', async (ctx) => {

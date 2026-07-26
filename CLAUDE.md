@@ -10,9 +10,14 @@ appended to the system prompt per turn — do not confuse the two.
 - The queue is a single global lane on purpose (one machine, one user). Don't add
   concurrency without revisiting outbox and DM interleaving.
 - `persona\` is edited at runtime by the approval flow (`src\improve\proposals.ts`), each
-  change a git commit. Hand-edits are fine too — commit them so `/revert` has clean history.
-- Never commit `.env` or anything under `state\`, `inbox\`, `outbox\`, `artifacts\`,
-  `archive\`.
+  change a `persona_versions` snapshot in SQLite; `/revert` restores one. Hand-edits are
+  fine too — they're snapshotted on the next boot so history stays complete.
+- **This repo is the only git on the machine** — code and instructions only. Never commit
+  `.env`, anything under `state\` / `archive\`, or anything from the Desktop data root.
+  Never `git init` anywhere else. Commits are plain — no attribution, no generated-with
+  lines (enforced). The persona flow does not use git; `/revert` is SQLite.
+- The data root is the Desktop itself: `0_Inbox\` (arrivals), `1_Projects\` / `2_Academic\`
+  / `3_General\` (the immutable raw archive), `wiki\`, `index.md`, `log.md`, `outbox\`.
 - Restarting after a src change: `/restart` in the DM (the wrapper loop re-execs tsx).
 - The guard hook (`src\agent\guard.ts`) is the counterweight to bypassPermissions — keep it
   small, static, and reviewed; don't accrete ad-hoc rules mid-incident.

@@ -89,7 +89,7 @@ const { runTurn } = await import('./agent/runner.js');
 const { drainOutbox } = await import('./outbox.js');
 const scheduler = await import('./scheduler/scheduler.js');
 const { registerCodeJobs, trackTokenAge } = await import('./scheduler/jobs.js');
-const { ensurePersonaCommitted } = await import('./improve/proposals.js');
+const { ensurePersonaBaseline } = await import('./improve/proposals.js');
 
 const bot = createBot();
 setBot(bot);
@@ -134,7 +134,7 @@ try {
   log.error({ err: String(e) }, 'telegram archive runtime failed to start');
   void sendOwner(ownerVoice.ops.archiveFailedToStart(String(e)));
 }
-await ensurePersonaCommitted();
+ensurePersonaBaseline();
 
 // ---- watchdog + process safety -------------------------------------------
 

@@ -265,6 +265,15 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_raw_shelf_project ON raw_shelf(project);
   `,
+  `
+  CREATE TABLE persona_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    label TEXT NOT NULL,
+    persona TEXT NOT NULL,
+    lessons TEXT NOT NULL
+  );
+  `,
 ];
 
 export let db: DatabaseSync;
