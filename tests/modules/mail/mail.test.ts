@@ -1,8 +1,8 @@
-import './env.js';
+import '../../env.js';
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileSignature, messageId, renderMessageMd, slugify } from '../src/connectors/mail.js';
+import { fileSignature, messageId, renderMessageMd, slugify } from '../../../src/modules/mail/watcher.js';
 
 test('slugify normalizes subjects', () => {
   assert.equal(slugify('Re: [CS2109] Problem Set 3!!'), 're-cs2109-problem-set-3');

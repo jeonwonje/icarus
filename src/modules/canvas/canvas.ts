@@ -8,7 +8,7 @@ import { getSetting, now, setSetting } from '../../db.js';
 import { log } from '../../log.js';
 import { submitTurn } from '../../queue.js';
 import { sendOwner } from '../../telegram/send.js';
-import { isProcessed, markProcessed } from '../../connectors/store.js';
+import { isProcessed, markProcessed } from '../../processedStore.js';
 import { getCanvasConfig } from './config.js';
 import {
   CanvasAuthError,

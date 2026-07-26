@@ -3,14 +3,15 @@ import { mkdirSync, readdirSync, statSync, writeFileSync, createWriteStream } fr
 import path from 'node:path';
 import { Cron } from 'croner';
 import { PSTFile, PSTFolder, PSTMessage } from 'pst-extractor';
-import { cfg } from '../config.js';
-import { getSetting, now, setSetting } from '../db.js';
-import { log } from '../log.js';
-import { submitTurn } from '../queue.js';
-import { ownerVoice } from '../agent/ownerVoice.js';
-import { DIGEST_STYLE } from '../agent/digestStyle.js';
-import { sendOwner } from '../telegram/send.js';
-import { isProcessed, markProcessed } from './store.js';
+import { cfg } from '../../config.js';
+import { getSetting, now, setSetting } from '../../db.js';
+import { log } from '../../log.js';
+import { submitTurn } from '../../queue.js';
+import { ownerVoice } from '../../agent/ownerVoice.js';
+import { DIGEST_STYLE } from '../../agent/digestStyle.js';
+import { sendOwner } from '../../telegram/send.js';
+import { isProcessed, markProcessed } from '../../processedStore.js';
+import { getMailConfig } from './config.js';
 
 export interface MailMeta {
   id: string;
@@ -71,15 +72,30 @@ const sanitize = (name: string) => name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').s
 /** name → last-seen size/mtime; a file is "ready" when unchanged across two polls. */
 const pollState = new Map<string, { size: number; mtimeMs: number }>();
 
+export function formatMailStatusLine(p: {
+  exportAt?: string | null;
+  parse?: string | null;
+}): string {
+  return `▸ mail · export ${p.exportAt?.slice(0, 16) ?? 'never'} · parse ${p.parse ?? 'never'}`;
+}
+
+export function mailStatusLine(): string | null {
+  getMailConfig();
+  return formatMailStatusLine({
+    exportAt: getSetting('mail_last_export_at'),
+    parse: getSetting('mail_last_parse'),
+  });
+}
+
 export function registerMailWatcher(): void {
-  if (!cfg.mailDropDir) return;
+  const { dropDir } = getMailConfig();
   new Cron('*/5 * * * *', { protect: true }, () => void pollMailDrop());
-  log.info({ dir: cfg.mailDropDir }, 'mail watcher registered');
+  log.info({ dir: dropDir }, 'mail watcher registered');
 }
 
 export async function pollMailDrop(): Promise<void> {
   try {
-    const dir = cfg.mailDropDir!;
+    const dir = getMailConfig().dropDir;
     let names: string[];
     try {
       names = readdirSync(dir).filter((n) => n.toLowerCase().endsWith('.pst'));

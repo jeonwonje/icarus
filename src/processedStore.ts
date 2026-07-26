@@ -1,4 +1,4 @@
-import { db, now } from '../db.js';
+import { db, now } from './db.js';
 
 /** Permanent has-this-been-processed record for connector items (mail messages, files, TG batches). */
 export function isProcessed(source: string, itemId: string): boolean {

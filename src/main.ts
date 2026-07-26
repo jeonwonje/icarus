@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { cfg } from './config.js';
 import { db, getSetting, now, openDb, setSetting } from './db.js';
 
@@ -30,6 +31,9 @@ if (process.argv.includes('--selftest')) {
   process.env.ICARUS_BROWSER_MCP ??= JSON.stringify({ command: process.execPath, args: ['-e', ''] });
   process.env.CANVAS_BASE_URL ??= 'https://selftest.instructure.com';
   process.env.CANVAS_API_TOKEN ??= 'selftest';
+  const selftestMailDrop = path.join(cfg.stateDir, 'selftest-mail-drop');
+  mkdirSync(selftestMailDrop, { recursive: true });
+  process.env.ICARUS_MAIL_DROP ??= selftestMailDrop;
 
   const { createModuleHost, setModuleHost, registerAll, MODULES } = await import('./modules/registry.js');
   const selftestHost = createModuleHost();
@@ -66,7 +70,7 @@ if (process.argv.includes('--selftest')) {
   console.log(`  tables: ${tables.join(', ')}`);
   console.log(`  desktop cwd: ${cfg.desktopDir}`);
   console.log(`  tz: ${cfg.tz}  model: ${cfg.defaultModel}`);
-  console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}`);
+  console.log(`  mail drop: ${process.env.ICARUS_MAIL_DROP ?? 'unset'}`);
   console.log(`  modules: ${MODULES.map((m) => m.id).join(', ')}`);
   console.log(`  tg config: ${cfg.tgConfigState}`);
   console.log(`  canvas: ${process.env.CANVAS_BASE_URL ?? 'unset'}`);
@@ -140,8 +144,6 @@ scheduler.seedSystemRows();
 scheduler.reloadSchedules();
 trackTokenAge();
 registerCodeJobs();
-const { registerMailWatcher } = await import('./connectors/mail.js');
-registerMailWatcher();
 // Personal Telegram is independent of the owner bot: bad credentials must not crash-loop Icarus.
 try {
   const { startTelegramRuntime } = await import('./connectors/telegram/runtime.js');
