@@ -3,6 +3,7 @@ import { createLineReader, expandEnvRefs } from '../src/modules/browser/probe.js
 import { loadMcpServers, mcpJsonPath } from '../src/modules/mcpJsonFile.js';
 
 const TIMEOUT_MS = 30_000;
+const CLOSE_MS = 3_000;
 
 type StdioEntry = { command: string; args?: string[]; env?: Record<string, string> };
 
@@ -15,6 +16,11 @@ function browserEntry(): StdioEntry {
   return entry;
 }
 
+/** The native host serves one transport at a time; killing the bridge wedges it for the next run. */
+const WEDGED = 'Already connected to a transport';
+const WEDGED_HINT =
+  'the native host is wedged by a previous unclean exit — kill the node process listening on 127.0.0.1:12306 and the extension will relaunch it';
+
 async function main(): Promise<void> {
   const entry = browserEntry();
   const command = expandEnvRefs(entry.command);
@@ -26,16 +32,27 @@ async function main(): Promise<void> {
   console.log(`spawning: ${command} ${args.join(' ')}`);
   const child = spawn(command, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
   let done = false;
-  const fail = (message: string): never => {
+
+  /** Ends stdin so the server closes its upstream session, then waits before forcing. */
+  const shutdown = async (): Promise<void> => {
     done = true;
+    child.stdin.end();
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(() => { child.kill(); resolve(); }, CLOSE_MS);
+      child.once('exit', () => { clearTimeout(t); resolve(); });
+    });
+  };
+
+  const fail = async (message: string): Promise<never> => {
     console.error(`FAIL: ${message}`);
-    child.kill();
+    await shutdown();
     process.exit(1);
   };
-  child.on('error', (e) => fail(`could not spawn the browser server: ${e.message}`));
+
+  child.on('error', (e) => void fail(`could not spawn the browser server: ${e.message}`));
   child.on('exit', (code) => {
     if (done) return;
-    fail(`server exited with code ${code} before responding — the spawned path is likely wrong`);
+    void fail(`server exited with code ${code} before responding — the spawned path is likely wrong`);
   });
 
   const reader = createLineReader();
@@ -48,7 +65,7 @@ async function main(): Promise<void> {
       const resolve = pending.get(m.id);
       if (!resolve) continue;
       pending.delete(m.id);
-      if (m.error) fail(`server returned an error: ${m.error.message ?? 'unknown'}`);
+      if (m.error) void fail(`server returned an error: ${m.error.message ?? 'unknown'}`);
       resolve(m.result);
     }
   });
@@ -64,7 +81,10 @@ async function main(): Promise<void> {
     });
   };
 
-  const timer = setTimeout(() => fail(`no response within ${TIMEOUT_MS}ms — is Chrome running with the extension connected?`), TIMEOUT_MS);
+  const timer = setTimeout(
+    () => void fail(`no response within ${TIMEOUT_MS}ms — is Chrome running with the extension connected?`),
+    TIMEOUT_MS,
+  );
 
   const init = (await call('initialize', {
     protocolVersion: '2024-11-05',
@@ -75,23 +95,51 @@ async function main(): Promise<void> {
 
   child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
 
+  // The bridge answers initialize and tools/list locally, so neither proves the extension is
+  // attached. Only a tool call reaches the native host.
   const listed = (await call('tools/list')) as { tools: { name: string }[] };
   const names = listed.tools.map((t) => t.name);
   console.log(`tools (${names.length}): ${names.join(', ')}`);
 
   const tabsTool = names.find((n) => /windows_and_tabs/.test(n));
-  if (!tabsTool) fail(`no tab-listing tool found among: ${names.join(', ')}`);
+  if (!tabsTool) {
+    await fail(`no tab-listing tool found among: ${names.join(', ')}`);
+    return;
+  }
 
   const tabs = (await call('tools/call', { name: tabsTool, arguments: {} })) as {
     content?: { type: string; text?: string }[];
+    isError?: boolean;
   };
   clearTimeout(timer);
+
+  const text = (tabs.content ?? []).map((c) => c.text ?? '').join('\n').trim();
+  if (tabs.isError || !text) {
+    await fail(`${tabsTool} returned no usable content: ${text || '(empty)'}`);
+    return;
+  }
+  if (text.includes(WEDGED)) {
+    await fail(WEDGED_HINT);
+    return;
+  }
+
+  let parsed: { tabCount?: number; windows?: unknown[] };
+  try {
+    parsed = JSON.parse(text) as { tabCount?: number; windows?: unknown[] };
+  } catch {
+    await fail(`${tabsTool} did not return JSON — server said: ${text.slice(0, 300)}`);
+    return;
+  }
+  if (typeof parsed.tabCount !== 'number' || !Array.isArray(parsed.windows)) {
+    await fail(`${tabsTool} returned an unrecognised payload: ${text.slice(0, 300)}`);
+    return;
+  }
+
   console.log('--- live tabs ---');
-  console.log(tabs.content?.map((c) => c.text ?? '').join('\n') ?? '(no content)');
+  console.log(text);
   console.log('--- end ---');
-  console.log('PASS: check the tabs above are YOUR real open tabs, not an empty throwaway profile.');
-  done = true;
-  child.kill();
+  console.log(`PASS: ${parsed.tabCount} tab(s) in ${parsed.windows.length} window(s) — check these are YOUR real tabs, not an empty throwaway profile.`);
+  await shutdown();
   process.exitCode = 0;
 }
 

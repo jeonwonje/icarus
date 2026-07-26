@@ -66,6 +66,24 @@ Missing `mcpServers.browser` fails boot. Chrome being closed, the extension bein
 disconnected, or auto-connect being switched off after an extension update do **not** fail
 boot — turns simply lack browser tools. Report that plainly; do not retry-loop.
 
+## One transport at a time
+
+The native host serves **one MCP transport at a time**. A bridge process that exits without a
+clean MCP close — killed rather than shut down — leaves the server-side transport registered,
+and every later connection fails with HTTP 500 `Already connected to a transport`.
+
+It hides well: no bridge process survives, `netstat` shows no connection to 12306, and both
+`initialize` and `tools/list` still succeed because the stdio bridge answers those **locally,
+without reaching the native host**. Only a tool call exposes it. The symptom therefore looks
+like "Chrome isn't connected" when the extension is fine.
+
+Clear it by killing the node process listening on `127.0.0.1:12306`; the extension relaunches
+it within seconds.
+
+`scripts/browser-probe.ts` shuts down by ending the child's stdin and waiting, rather than
+killing it, so running the probe does not wedge the host for the next run. Anything else that
+spawns the bridge must do the same.
+
 ## Risk
 
 Browser actions are ungated. `src/agent/guard.ts` matches only
