@@ -62,6 +62,12 @@ You need Node 24+, git, and a Claude subscription.
 
 The bot answers **only** the user id in `.env`. Everyone else gets silence.
 
+### Optional: Canvas LMS digests
+
+1. In Canvas: Account → Settings → New Access Token; copy the token.
+2. Set `CANVAS_BASE_URL` (e.g. `https://your-school.instructure.com`) and `CANVAS_API_TOKEN` in `.env`.
+3. `/restart`, then `/canvas` for an on-demand check. Scheduled polls run at 08:00 and 18:00 in `ICARUS_TZ`.
+
 ### Optional: archive personal Telegram chats
 
 1. Create API credentials at https://my.telegram.org → API development tools.

@@ -58,6 +58,7 @@ if (process.argv.includes('--selftest')) {
   console.log(`  tz: ${cfg.tz}  model: ${cfg.defaultModel}`);
   console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}  browser mcp: ${cfg.browserMcp ? 'configured' : 'unset'}`);
   console.log(`  tg config: ${cfg.tgConfigState}  calendar mcp: ${cfg.calendarMcp ? 'configured' : 'unset'}`);
+  console.log(`  canvas: ${cfg.canvasBaseUrl && cfg.canvasApiToken ? cfg.canvasBaseUrl : 'unset'}`);
   console.log(`  tg archive: ${tgMessages} messages · ${tgMedia} media · ${tgPending} pending work`);
   console.log(`  tg update positions: ${tgPositions || 'none'}`);
   console.log(`  persona: ${composePersona().length} chars`);
@@ -122,6 +123,8 @@ trackTokenAge();
 registerCodeJobs();
 const { registerMailWatcher } = await import('./connectors/mail.js');
 registerMailWatcher();
+const { registerCanvasWatcher } = await import('./connectors/canvas.js');
+registerCanvasWatcher();
 // Personal Telegram is independent of the owner bot: bad credentials must not crash-loop Icarus.
 try {
   const { startTelegramRuntime } = await import('./connectors/telegram/runtime.js');
