@@ -123,6 +123,8 @@ trackTokenAge();
 registerCodeJobs();
 const { registerMailWatcher } = await import('./connectors/mail.js');
 registerMailWatcher();
+const { registerCanvasWatcher } = await import('./connectors/canvas.js');
+registerCanvasWatcher();
 // Personal Telegram is independent of the owner bot: bad credentials must not crash-loop Icarus.
 try {
   const { startTelegramRuntime } = await import('./connectors/telegram/runtime.js');

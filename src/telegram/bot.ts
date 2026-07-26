@@ -4,6 +4,7 @@ import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { cfg, MODEL_ALIASES, OWNER_JID, resolveModel, ROOT } from '../config.js';
+import { formatCanvasStatusLine } from '../connectors/canvas.js';
 import {
   telegramHealth,
   telegramRuntime,
@@ -130,6 +131,16 @@ async function statusText(): Promise<string> {
       : 'no job runs yet',
     ...(cfg.mailDropDir
       ? [`▸ mail · export ${getSetting('mail_last_export_at')?.slice(0, 16) ?? 'never'} · parse ${getSetting('mail_last_parse') ?? 'never'}`]
+      : []),
+    ...(cfg.canvasBaseUrl && cfg.canvasApiToken
+      ? [
+          formatCanvasStatusLine({
+            baseUrl: cfg.canvasBaseUrl,
+            status: getSetting('canvas_last_poll_status') || 'never',
+            pollAt: getSetting('canvas_last_poll_at'),
+            digestAt: getSetting('canvas_last_digest_at'),
+          }),
+        ]
       : []),
     `▸ tg · ${renderTelegramStatusLine(telegramHealth())}`,
     `▸ token age · ${tokenAge} · db ${dbSize}`,
@@ -596,6 +607,20 @@ export function createBot(): Bot {
     setTimeout(() => process.exit(0), 500);
   });
 
+  bot.command('canvas', async (ctx) => {
+    const { runCanvasPoll, canvasConfigured } = await import('../connectors/canvas.js');
+    if (!canvasConfigured()) {
+      return ctx.reply('Canvas not configured (set CANVAS_BASE_URL and CANVAS_API_TOKEN).');
+    }
+    await ctx.reply('checking Canvas…');
+    await runCanvasPoll({
+      force: true,
+      reply: async (text) => {
+        await ctx.reply(text);
+      },
+    });
+  });
+
   bot.command('stop', async (ctx) => {
     await ctx.reply(abortRunning() ? 'stopping the current turn…' : 'nothing is running.');
   });
@@ -636,7 +661,7 @@ export function createBot(): Bot {
       const text = ctx.message.text?.trim();
       if (!text) return;
       if (text.startsWith('/'))
-        return ctx.reply('unknown command — /status /wiki /schedules /model /stop /clear /feedback /revert /tg /archive /restart');
+        return ctx.reply('unknown command — /status /wiki /schedules /model /stop /clear /feedback /revert /tg /archive /canvas /restart');
       submitOwnerText(text);
     } catch (e) {
       log.error({ err: String(e) }, 'message handler failed');
@@ -660,6 +685,7 @@ const MENU_COMMANDS = [
   { command: 'revert', description: 'roll back a persona change' },
   { command: 'tg', description: 'manage personal Telegram archive' },
   { command: 'archive', description: 'search archived Telegram messages' },
+  { command: 'canvas', description: 'check Canvas LMS for new items' },
   { command: 'restart', description: 'restart Icarus' },
 ];
 

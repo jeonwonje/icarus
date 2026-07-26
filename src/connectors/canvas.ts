@@ -65,6 +65,26 @@ export function canvasConfigured(): boolean {
   return !!(cfg.canvasBaseUrl && cfg.canvasApiToken);
 }
 
+export function formatCanvasStatusLine(p: {
+  baseUrl: string;
+  status: string;
+  pollAt: string | undefined;
+  digestAt: string | undefined;
+}): string {
+  const host = p.baseUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return `▸ canvas · ${host} · poll ${p.status} ${p.pollAt?.slice(0, 16) ?? 'never'} · digest ${p.digestAt?.slice(0, 16) ?? 'never'}`;
+}
+
+export function canvasStatusLine(): string | null {
+  if (!cfg.canvasBaseUrl || !cfg.canvasApiToken) return null;
+  return formatCanvasStatusLine({
+    baseUrl: cfg.canvasBaseUrl,
+    status: getSetting('canvas_last_poll_status') || 'never',
+    pollAt: getSetting('canvas_last_poll_at'),
+    digestAt: getSetting('canvas_last_digest_at'),
+  });
+}
+
 /** Clears persisted auth early-out so scheduled polls retry after /restart. */
 export function clearCanvasAuthGate(deps?: {
   getStatus: () => string | undefined;
