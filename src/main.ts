@@ -81,6 +81,11 @@ if (process.argv.includes('--evals')) {
 
 // ---- full service ---------------------------------------------------------
 
+const { createModuleHost } = await import('./modules/host.js');
+const { registerAll } = await import('./modules/registry.js');
+const moduleHost = createModuleHost();
+await registerAll(moduleHost);
+
 const { ownerVoice } = await import('./agent/ownerVoice.js');
 const { createBot, registerCommands } = await import('./telegram/bot.js');
 const { setBot, sendOwner } = await import('./telegram/send.js');
