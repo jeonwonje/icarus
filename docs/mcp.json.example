@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "calendar": {
+      "command": "npx",
+      "args": ["-y", "@cocal/google-calendar-mcp"],
+      "env": {
+        "GOOGLE_OAUTH_CREDENTIALS": "${USERPROFILE}\\Desktop\\icarus\\state\\gcp-oauth.keys.json",
+        "GOOGLE_CALENDAR_MCP_TOKEN_PATH": "${USERPROFILE}\\Desktop\\icarus\\state\\gcp-calendar-token.json"
+      }
+    },
+    "browser": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    }
+  }
+}

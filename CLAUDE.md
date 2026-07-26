@@ -11,10 +11,12 @@ appended to the system prompt per turn — do not confuse the two.
   concurrency without revisiting outbox and DM interleaving.
 - Capabilities live under `src\modules\` — seven required modules registered in
   `src\modules\registry.ts` (calendar, browser, canvas, mail, improve, memory, tg-archive).
-  Missing or invalid module config fails boot. Module env: `ICARUS_CALENDAR_MCP`,
-  `ICARUS_BROWSER_MCP`, `CANVAS_BASE_URL`, `CANVAS_API_TOKEN`, `ICARUS_MAIL_DROP`,
-  `TG_API_ID`, `TG_API_HASH`, `TG_SESSION`. See `src\modules\README.md` and each module's
-  README.
+  Missing or invalid module config fails boot. Calendar/browser require
+  `mcpServers.calendar` / `mcpServers.browser` in Desktop `.mcp.json` (see
+  `docs\mcp.json.example`). Both are stdio and authenticate outside Claude — a headless
+  agent can't run an interactive OAuth flow, so no hosted/connector MCPs here. Other module env:
+  `CANVAS_BASE_URL`, `CANVAS_API_TOKEN`, `ICARUS_MAIL_DROP`, `TG_API_ID`,
+  `TG_API_HASH`, `TG_SESSION`. See `src\modules\README.md` and each module's README.
 - `persona\` is edited at runtime by the approval flow (`src\modules\improve\proposals.ts`),
   each change a `persona_versions` snapshot in SQLite; `/revert` restores one. Hand-edits are
   fine too — they're snapshotted on the next boot so history stays complete.

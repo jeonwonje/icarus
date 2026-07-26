@@ -2,7 +2,6 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { cfg, OWNER_JID, resolveModel, buildSdkEnv } from '../config.js';
 import { db, getSetting, now } from '../db.js';
 import { log } from '../log.js';
-import { getModuleHost, mcpServersForTurn } from '../modules/host.js';
 import { buildIcarusServer } from '../mcp/icarusTools.js';
 import type { TurnJob, TurnResult } from '../queue.js';
 import { sendOwner } from '../telegram/send.js';
@@ -69,11 +68,11 @@ export async function runTurn(job: TurnJob): Promise<TurnResult> {
           settingSources: ['user', 'project'],
           systemPrompt: { type: 'preset', preset: 'claude_code', append: composePersona() },
           tools: { type: 'preset', preset: 'claude_code' },
+          // Project Desktop/.mcp.json + user MCP load via settingSources; only inject in-process tools here.
           mcpServers: {
             icarus: buildIcarusServer({ jid: job.jid, kind: job.kind, getSessionId: () => sessionId }),
-            ...mcpServersForTurn(getModuleHost(), job),
           },
-          strictMcpConfig: true,
+          strictMcpConfig: false,
           env: buildSdkEnv(),
           hooks: {
             UserPromptSubmit: [{ hooks: [buildContextHook(job.jid, job.kind, job.lines.length)] }],

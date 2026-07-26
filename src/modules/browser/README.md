@@ -1,13 +1,17 @@
 # browser module
 
-Stdio MCP server for mail-triage turns (`job.browser === true`), e.g. chrome-devtools-mcp.
+Requires `mcpServers.browser` in Desktop `.mcp.json` (Claude project MCP). Typically a
+local stdio server such as `chrome-devtools-mcp`. Loaded by the Agent SDK on every turn
+(same as other `.mcp.json` servers).
 
-## Required env
+## Setup
 
-`ICARUS_BROWSER_MCP` — JSON `{ "command", "args"?, "env"? }`, e.g.:
+1. Ensure Desktop `.mcp.json` includes a `browser` entry (see
+   [`docs/mcp.json.example`](../../../docs/mcp.json.example)).
+2. `/restart` Icarus.
 
-```json
-{"command":"npx","args":["-y","chrome-devtools-mcp@latest"]}
-```
+No Claude OAuth for stdio servers. Missing `mcpServers.browser` fails boot.
 
-Missing or invalid JSON fails boot. `--selftest` uses a no-op Node stub.
+## Selftest
+
+`--selftest` skips the Desktop file check.

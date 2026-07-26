@@ -63,17 +63,31 @@ You need Node 24+, git, and a Claude subscription.
 
 The bot answers **only** the user id in `.env`. Everyone else gets silence.
 
-### Required module env
+### Required module config
 
 All seven capabilities are **required modules** under `src/modules/`. Boot fails with a
-clear error if any module config is missing or invalid. Copy `.env.example` and fill in
-every module key:
+clear error if any module config is missing or invalid.
 
-| Module | Env |
+**MCP (calendar, browser, and any future servers):** copy
+[`docs/mcp.json.example`](docs/mcp.json.example) to `Desktop\.mcp.json`. Use **stdio**
+servers that authenticate outside Claude — a headless Telegram agent cannot complete an
+interactive OAuth flow, and Google's hosted Calendar MCP only works as a claude.ai account
+connector, not a project MCP. Authenticate calendar once in a normal terminal:
+
+```
+$env:GOOGLE_OAUTH_CREDENTIALS = "$env:USERPROFILE\Desktop\icarus\state\gcp-oauth.keys.json"
+$env:GOOGLE_CALENDAR_MCP_TOKEN_PATH = "$env:USERPROFILE\Desktop\icarus\state\gcp-calendar-token.json"
+npx @cocal/google-calendar-mcp auth
+```
+
+Icarus loads that file because agent `cwd` is the Desktop (`strictMcpConfig` is off).
+The server refreshes its own token; Telegram turns never open a browser.
+
+| Module | Config |
 |---|---|
-| calendar | `ICARUS_CALENDAR_MCP` — JSON stdio MCP (Google Calendar or equivalent) |
-| browser | `ICARUS_BROWSER_MCP` — JSON stdio MCP (e.g. chrome-devtools-mcp) |
-| canvas | `CANVAS_BASE_URL`, `CANVAS_API_TOKEN` |
+| calendar | `mcpServers.calendar` in Desktop `.mcp.json` (`@cocal/google-calendar-mcp` stdio) |
+| browser | `mcpServers.browser` in Desktop `.mcp.json` (e.g. chrome-devtools-mcp stdio) |
+| canvas | `CANVAS_BASE_URL`, `CANVAS_API_TOKEN` in `.env` |
 | mail | `ICARUS_MAIL_DROP` — folder for daily Outlook `.pst` exports |
 | tg-archive | `TG_API_ID`, `TG_API_HASH`, `TG_SESSION` (via `npm run tg-setup`) |
 | improve | always on — persona + evals paths |

@@ -27,8 +27,6 @@ for (const d of [
 // ---- one-shot modes -------------------------------------------------------
 
 if (process.argv.includes('--selftest')) {
-  process.env.ICARUS_CALENDAR_MCP ??= JSON.stringify({ command: process.execPath, args: ['-e', ''] });
-  process.env.ICARUS_BROWSER_MCP ??= JSON.stringify({ command: process.execPath, args: ['-e', ''] });
   process.env.CANVAS_BASE_URL ??= 'https://selftest.instructure.com';
   process.env.CANVAS_API_TOKEN ??= 'selftest';
   const selftestMailDrop = path.join(cfg.stateDir, 'selftest-mail-drop');

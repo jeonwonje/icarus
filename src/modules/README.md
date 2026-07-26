@@ -17,7 +17,8 @@ export interface Module {
 
 During `register()`, a module may:
 
-- `addMcp` — stdio MCP servers (optional `when` predicate per turn)
+- `addMcp` — stdio MCP servers injected per turn (optional `when` predicate). Prefer
+  Desktop `.mcp.json` for calendar/browser and future Claude-loaded servers instead.
 - `addTools` — extra tools merged into the in-process `icarus` MCP server
 - `addCommand` / `addCallback` — owner-bot slash commands and inline callbacks
 - `onStart` / `onStop` — side effects after register (watchers, runtimes)
@@ -30,7 +31,7 @@ The explicit ordered list lives in `registry.ts` as `MODULES`. `registerAll(host
 
 1. Kernel config + DB migrate
 2. `createModuleHost()` → `registerAll(host)` (config validation happens here)
-3. Wire queue ↔ agent (runner reads MCP/tools from host)
+3. Wire queue ↔ agent (runner injects in-process `icarus` MCP; Desktop `.mcp.json` loads via Claude `settingSources`)
 4. Create bot; attach kernel + module commands/callbacks
 5. Run module `onStart` hooks
 6. Start bot polling
@@ -40,8 +41,8 @@ The explicit ordered list lives in `registry.ts` as `MODULES`. `registerAll(host
 
 | Module | Id | Required config |
 |---|---|---|
-| Calendar | `calendar` | `ICARUS_CALENDAR_MCP` |
-| Browser | `browser` | `ICARUS_BROWSER_MCP` |
+| Calendar | `calendar` | Desktop `.mcp.json` → `mcpServers.calendar` |
+| Browser | `browser` | Desktop `.mcp.json` → `mcpServers.browser` |
 | Canvas | `canvas` | `CANVAS_BASE_URL`, `CANVAS_API_TOKEN` |
 | Mail | `mail` | `ICARUS_MAIL_DROP` |
 | Improve | `improve` | persona + evals paths (always on) |
