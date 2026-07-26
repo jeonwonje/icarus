@@ -46,8 +46,13 @@ test('filterActiveCourses keeps active student enrollments and favorites', () =>
       workflow_state: 'available',
       enrollments: [{ type: 'teacher', enrollment_state: 'active' }],
     },
+    {
+      id: 5,
+      name: 'No enrollments payload',
+      workflow_state: 'available',
+    },
   ]);
-  assert.deepEqual(kept.map((c) => c.id).sort(), [1, 2]);
+  assert.deepEqual(kept.map((c) => c.id).sort(), [1, 2, 5]);
 });
 
 test('classifyNew drops seen ids and flags needsCalendar on first-seen dated assignments', () => {
