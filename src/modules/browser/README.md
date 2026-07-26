@@ -38,20 +38,24 @@ Run by the owner in a normal terminal — never through Claude.
    package's own postinstall, which would otherwise register the Native Messaging host, so
    this must be run by hand. It writes an `HKCU\Software\Google\Chrome\NativeMessagingHosts`
    entry — confirmed working on this machine.
-3. Load the `mcp-chrome` extension in Chrome (`chrome://extensions` → Developer mode → Load
+3. `node scripts/patch-mcp-chrome.mjs` — **required.** Without it browser tools work on the
+   first turn and fail on every turn afterwards; see
+   [the singleton bug](#the-singleton-bug--patched-locally-re-apply-after-any-reinstall).
+   Re-run after any reinstall of the bridge.
+4. Load the `mcp-chrome` extension in Chrome (`chrome://extensions` → Developer mode → Load
    unpacked, or the Web Store listing). Staged at
    `C:\Users\jeon\Desktop\icarus\state\mcp-chrome-extension` (release v1.0.0, `manifest.json`
    at the folder root; `state/` is gitignored).
-4. **Enable auto-connect in the extension popup.** Without it the extension attaches only
+5. **Enable auto-connect in the extension popup.** Without it the extension attaches only
    when clicked, which a headless agent cannot do. This is the step most likely to be missed.
-5. Copy the `browser` entry from [`docs/mcp.json.example`](../../../docs/mcp.json.example)
+6. Copy the `browser` entry from [`docs/mcp.json.example`](../../../docs/mcp.json.example)
    into Desktop `.mcp.json`.
-6. `npm run browser-probe` — confirms the server answers and prints the owner's live tabs.
+7. `npm run browser-probe` — confirms the server answers and prints the owner's live tabs.
    Empty or unfamiliar tabs mean the extension is not attached. **Must be run from the main
    checkout, not a worktree:** `src/config.ts` derives `DESKTOP` as `ROOT/..`, so from a
    worktree it resolves to `...\.claude\worktrees` instead of the Desktop and never finds
    `.mcp.json`. This is inherent to the app's path model, not a probe defect.
-7. `/restart` Icarus.
+8. `/restart` Icarus.
 
 Transport is **stdio**, not the server's HTTP endpoint. The native host's server listens on
 `127.0.0.1:12306` regardless of transport — confirmed by `ECONNREFUSED` on that port before
@@ -66,32 +70,47 @@ Missing `mcpServers.browser` fails boot. Chrome being closed, the extension bein
 disconnected, or auto-connect being switched off after an extension update do **not** fail
 boot — turns simply lack browser tools. Report that plainly; do not retry-loop.
 
-## One client per host lifetime — the main operational limit
+## The singleton bug — patched locally, re-apply after any reinstall
 
-The native host accepts **exactly one MCP client per host lifetime**, on any transport. Every
-connection after the first fails with HTTP 500 `Already connected to a transport`.
+Stock `mcp-chrome` accepts **exactly one MCP client per host lifetime**, on any transport.
+Every connection after the first fails with HTTP 500 `Already connected to a transport`.
+`dist/mcp/mcp-server.js` caches one `Server` forever and calls `.connect()` on it per client.
 
-Verified three ways: the stdio bridge wedges on the second run; a direct HTTP client wedges
-identically on its second `initialize`; and the host's `DELETE` session verb answers 400, so
-there is no teardown to call. Ending the bridge's stdin cleanly does **not** release it — this
-is the host's own lifecycle, not the bridge's.
+This is fatal here, not cosmetic: the Agent SDK connects a browser client per turn, so browser
+tools worked on turn 1 and failed on **every** turn after. Measured with three simulated turns —
+turn 1 returned a tab count, turns 2 and 3 both returned `Failed to connect to MCP server`, while
+every turn still reported `browser=connected` with all 24 tools exposed. The agent could not tell
+it was broken.
 
 It hides well: no bridge process survives, `netstat` shows no connection to 12306, and both
 `initialize` and `tools/list` still succeed because the stdio bridge answers those **locally,
 without reaching the native host**. Only a tool call exposes it. The symptom therefore looks
 like "Chrome isn't connected" when the extension is fine.
 
-Clear it by killing the node process listening on `127.0.0.1:12306`; the extension relaunches
-it within seconds.
+Upstream bug [#321](https://github.com/hangwin/mcp-chrome/issues/321) is open, with four
+unmerged PRs carrying this same fix (#295, #301, #338, #354). Last push to that repo was
+2026-01-06 and v1.0.0 is still the newest release, so do not wait for it.
 
-`scripts/browser-probe.ts` shuts down by ending the child's stdin rather than killing it, and
-detects this error on both the tool result and stderr so it reports the cause instead of
-blaming Chrome. It cannot avoid the wedge — nothing on our side can.
+**`scripts/patch-mcp-chrome.mjs` applies the fix** — a fresh `Server` per connection, which is
+what those PRs do. Both `connect()` sites already build a per-request transport and track it in
+`transportsMap` with an `onclose` handler, so per-connection servers are safe.
 
-**Unresolved:** the Agent SDK connects a browser MCP client per session, so browser tools are
-expected to work once and then fail until the host restarts. Whether that bites every turn or
-only some has not been measured against real turns. Until it is, treat the browser capability
-as needing a host restart between uses.
+```
+node scripts/patch-mcp-chrome.mjs           # apply (idempotent)
+node scripts/patch-mcp-chrome.mjs --check   # exit 0 if patched, 1 if not
+```
+
+It edits a file under the global npm root, so **`npm i -g mcp-chrome-bridge` wipes it — re-run
+the patch and restart the host afterwards**. The patch refuses to run if upstream's code no
+longer matches the known-buggy shape, rather than mangling it. After patching, restart the host
+(kill the node process listening on `127.0.0.1:12306`; the extension relaunches it).
+
+Verified after patching: three consecutive `browser-probe` runs and three consecutive simulated
+turns all succeeded.
+
+`scripts/browser-probe.ts` detects this error on both the tool result and stderr, so if the
+patch is ever lost it names the cause instead of blaming Chrome. That check is the early warning
+that a reinstall has reverted the patch.
 
 ## Risk
 
