@@ -51,7 +51,7 @@ export function createCanvasClient(opts: {
         Accept: 'application/json',
       },
     });
-    if (res.status === 401) throw new CanvasAuthError();
+    if (res.status === 401 || res.status === 403) throw new CanvasAuthError();
     if (res.status === 429) throw new CanvasRateLimitError();
     if (!res.ok) {
       throw new Error(`Canvas HTTP ${res.status}: ${await res.text()}`);

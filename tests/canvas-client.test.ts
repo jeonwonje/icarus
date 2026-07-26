@@ -62,6 +62,15 @@ test('401 throws CanvasAuthError', async () => {
   await assert.rejects(() => client.listCourses(), CanvasAuthError);
 });
 
+test('403 throws CanvasAuthError', async () => {
+  const client = createCanvasClient({
+    baseUrl: 'https://school.instructure.com',
+    token: 'bad',
+    fetchImpl: async () => new Response('forbidden', { status: 403 }),
+  });
+  await assert.rejects(() => client.listCourses(), CanvasAuthError);
+});
+
 test('429 throws CanvasRateLimitError', async () => {
   const client = createCanvasClient({
     baseUrl: 'https://school.instructure.com',

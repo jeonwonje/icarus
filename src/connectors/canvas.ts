@@ -308,7 +308,7 @@ export async function runCanvasPoll(opts: {
     const watermark = deps.getWatermark();
     const startDate = announcementStartDate(watermark, deps.nowIso());
     const candidates = await collectCandidates(deps.client, courses, startDate);
-    const fresh = classifyNew(candidates, deps.isSeen);
+    const fresh = classifyNew(candidates, deps.isSeen, deps.nowIso());
 
     // First poll: quiet-seed — mark everything seen, no digest/triage.
     if (!watermark) {
@@ -349,11 +349,18 @@ export async function runCanvasPoll(opts: {
         );
         deps.setAuthNotified();
       }
+      // /canvas (force/reply) always acknowledges, even if notifyAuth already DMed once.
+      await respond(
+        opts,
+        'Canvas auth failed — fix CANVAS_API_TOKEN / CANVAS_BASE_URL, then /restart or /canvas.',
+      );
       return;
     }
     if (e instanceof CanvasRateLimitError) {
       deps.setStatus('rate');
       log.warn({ err: String(e) }, 'canvas poll rate limited');
+      // Scheduled stays silent; force/reply always acknowledges.
+      await respond(opts, 'Canvas rate limited — try again later.');
       return;
     }
     deps.setStatus('error');

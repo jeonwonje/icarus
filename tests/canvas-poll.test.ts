@@ -2,7 +2,11 @@ import './env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CanvasAuthError, type CanvasClient } from '../src/connectors/canvasClient.js';
+import {
+  CanvasAuthError,
+  CanvasRateLimitError,
+  type CanvasClient,
+} from '../src/connectors/canvasClient.js';
 import {
   clearCanvasAuthGate,
   runCanvasPoll,
@@ -277,4 +281,58 @@ test('auth error sets status and notifyAuth once', async () => {
   assert.match(notifies[0]!, /Canvas auth/i);
   assert.match(notifies[0]!, /\/restart/);
   assert.match(notifies[0]!, /\/canvas/);
+});
+
+test('force auth replies even after notifyAuth already fired', async () => {
+  let authNotified = true;
+  const notifies: string[] = [];
+  let replied: string | undefined;
+
+  await runCanvasPoll({
+    force: true,
+    reply: (t) => {
+      replied = t;
+    },
+    deps: makeDeps({
+      client: emptyClient({
+        listCourses: async () => {
+          throw new CanvasAuthError();
+        },
+      }),
+      getAuthNotified: () => authNotified,
+      setAuthNotified: () => {
+        authNotified = true;
+      },
+      notifyAuth: (msg) => {
+        notifies.push(msg);
+      },
+    }),
+  });
+
+  assert.equal(notifies.length, 0);
+  assert.match(replied!, /Canvas auth failed/i);
+});
+
+test('force rate limit replies; scheduled rate stays silent', async () => {
+  let replied: string | undefined;
+  const client = emptyClient({
+    listCourses: async () => {
+      throw new CanvasRateLimitError();
+    },
+  });
+
+  await runCanvasPoll({
+    force: false,
+    deps: makeDeps({ client }),
+  });
+  assert.equal(replied, undefined);
+
+  await runCanvasPoll({
+    force: true,
+    reply: (t) => {
+      replied = t;
+    },
+    deps: makeDeps({ client }),
+  });
+  assert.match(replied!, /rate limited/i);
 });

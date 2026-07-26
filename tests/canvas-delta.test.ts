@@ -55,8 +55,9 @@ test('filterActiveCourses keeps active student enrollments and favorites', () =>
   assert.deepEqual(kept.map((c) => c.id).sort(), [1, 2, 5]);
 });
 
-test('classifyNew drops seen ids and flags needsCalendar on first-seen dated assignments', () => {
+test('classifyNew drops seen ids and flags needsCalendar only for future-due assignments', () => {
   const seen = new Set(['announcement:1']);
+  const nowIso = '2026-07-26T08:00:00.000Z';
   const out = classifyNew(
     [
       {
@@ -82,13 +83,25 @@ test('classifyNew drops seen ids and flags needsCalendar on first-seen dated ass
         body: 'undated',
         dueAt: null,
       },
+      {
+        itemId: 'assignment:4',
+        kind: 'assignment',
+        title: 'Past due',
+        courseName: 'CS',
+        body: 'late',
+        dueAt: '2026-07-01T23:59:00Z',
+      },
     ],
     (id) => seen.has(id),
+    nowIso,
   );
-  assert.equal(out.length, 2);
+  assert.equal(out.length, 3);
   assert.equal(out[0]!.itemId, 'assignment:2');
   assert.equal(out[0]!.needsCalendar, true);
+  assert.equal(out[1]!.itemId, 'assignment:3');
   assert.equal(out[1]!.needsCalendar, false);
+  assert.equal(out[2]!.itemId, 'assignment:4');
+  assert.equal(out[2]!.needsCalendar, false);
 });
 
 test('renderDeltaMd lists needs_calendar explicitly', () => {

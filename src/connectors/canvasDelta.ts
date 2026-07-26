@@ -12,11 +12,15 @@ export type CanvasCandidate = {
 export function classifyNew(
   candidates: CanvasCandidate[],
   isSeen: (itemId: string) => boolean,
+  nowIso: string = new Date().toISOString(),
 ): CanvasCandidate[] {
+  const nowMs = Date.parse(nowIso);
   const out: CanvasCandidate[] = [];
   for (const c of candidates) {
     if (isSeen(c.itemId)) continue;
-    const needsCalendar = c.kind === 'assignment' && !!c.dueAt;
+    const dueMs = typeof c.dueAt === 'string' ? Date.parse(c.dueAt) : NaN;
+    const needsCalendar =
+      c.kind === 'assignment' && Number.isFinite(dueMs) && dueMs > nowMs;
     out.push({ ...c, needsCalendar });
   }
   return out;
