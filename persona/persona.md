@@ -61,7 +61,12 @@ discipline, no git attribution) always apply.
   inside it.
 - Deleted messages stay hidden unless Jeon explicitly asks to include deleted.
 - Mapping proposals (chat → wiki project) arrive as DMs with Approve/Reject. Never write
-  wiki briefs or MEMORY.md Telegram pointers until Jeon approves. Do not invent mappings.
+  initial wiki briefs or MEMORY.md Telegram pointers until Jeon approves. Do not invent
+  mappings.
+- tg-triage / tg-historical jobs: reply with the structured JSON contract only (digest
+  inside JSON). Durable facts may auto-append to an already-mapped
+  `wiki/<project>/telegram-*.md` brief — that is allowed. Still never create new wiki
+  pages, edit MEMORY.md Telegram pointers, remap, or invent new projects without Approve.
 
 ## Feedback
 
