@@ -81,6 +81,7 @@ if (process.argv.includes('--evals')) {
 
 // ---- full service ---------------------------------------------------------
 
+const { ownerVoice } = await import('./agent/ownerVoice.js');
 const { createBot, registerCommands } = await import('./telegram/bot.js');
 const { setBot, sendOwner } = await import('./telegram/send.js');
 const { initQueue, submitTurn } = await import('./queue.js');
@@ -99,7 +100,7 @@ initQueue(
     await drainOutbox(job.jid);
     return result;
   },
-  { onOwnerWaiting: (kind) => void sendOwner(`finishing ${kind.replace(/^job:/, '')}, then I'll answer.`) },
+  { onOwnerWaiting: (kind) => void sendOwner(ownerVoice.turn.waiting(kind)) },
 );
 
 scheduler.setEnqueue((name, prompt, { capMs, after }) => {
@@ -112,7 +113,7 @@ scheduler.setEnqueue((name, prompt, { capMs, after }) => {
       after?.(res);
       scheduler.recordResult(name, res.status, res.finalText || res.error || '');
       const body = res.status === 'ok' ? res.finalText : `failed: ${res.error ?? 'unknown'}`;
-      if (body.trim()) void sendOwner(`[${name}] ${body}`);
+      if (body.trim()) void sendOwner(ownerVoice.ops.jobPrefix(name, body));
     },
   });
 });
@@ -131,7 +132,7 @@ try {
   await startTelegramRuntime();
 } catch (e) {
   log.error({ err: String(e) }, 'telegram archive runtime failed to start');
-  void sendOwner(`telegram archive failed to start: ${String(e).slice(0, 200)}`);
+  void sendOwner(ownerVoice.ops.archiveFailedToStart(String(e)));
 }
 await ensurePersonaCommitted();
 
@@ -181,9 +182,9 @@ try {
   if (cleanShutdown) rmSync(cfg.shutdownMarker, { force: true });
   if (!getSetting('booted_once')) {
     setSetting('booted_once', now());
-    await sendOwner('Icarus online for the first time. Talk to me, send files, or /status.');
+    await sendOwner(ownerVoice.online.firstTime());
   } else if (!cleanShutdown) {
-    await sendOwner('Icarus back online (recovered from a crash or power loss).');
+    await sendOwner(ownerVoice.online.recovered());
   }
 } catch (e) {
   log.warn({ err: String(e) }, 'boot niceties failed (bad token or transient API error)');

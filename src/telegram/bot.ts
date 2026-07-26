@@ -26,6 +26,7 @@ import {
 import { db, getSetting, now, setSetting } from '../db.js';
 import { log } from '../log.js';
 import { clearPending, hasPending, queueStatus, submitTurn, abortRunning } from '../queue.js';
+import { ownerVoice } from '../agent/ownerVoice.js';
 import { clearSession, getSession } from '../agent/sessions.js';
 import { decideProposal, latestPending, listPersonaCommits, revertCommit } from '../improve/proposals.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
@@ -64,7 +65,7 @@ function armStopButton(): void {
   const armed: { timer: NodeJS.Timeout; msgId: number | null } = {
     msgId: null,
     timer: setTimeout(async () => {
-      const msgId = await sendOwnerEphemeral('working… tap to stop', new InlineKeyboard().text('⏹ stop', 'turn:stop'));
+      const msgId = await sendOwnerEphemeral(ownerVoice.turn.working(), new InlineKeyboard().text('⏹ stop', 'turn:stop'));
       if (stopUi === armed) stopUi.msgId = msgId;
       else if (msgId) void deleteOwnerMessage(msgId); // disarmed or re-armed during the send
     }, 10_000),
@@ -97,8 +98,8 @@ export function submitOwnerText(text: string): void {
           typingStop = null;
         }
       }
-      if (res.status === 'aborted') void sendOwner(`(turn aborted: ${res.error})`);
-      else if (res.status === 'error') void sendOwner(`turn failed: ${res.error}`);
+      if (res.status === 'aborted') void sendOwner(ownerVoice.turn.aborted(res.error ?? 'unknown'));
+      else if (res.status === 'error') void sendOwner(ownerVoice.turn.failed(res.error ?? 'unknown'));
     },
   });
 }
@@ -611,7 +612,7 @@ export function createBot(): Bot {
     log.debug({ from: ctx.from?.id, chat: ctx.chat?.id }, 'dropped non-owner update');
   });
 
-  bot.command('start', (ctx) => ctx.reply('Icarus online. Talk to me, send files, or /status.'));
+  bot.command('start', (ctx) => ctx.reply(ownerVoice.online.startCommand()));
 
   bot.command('status', async (ctx) => ctx.reply(await statusText(), { reply_markup: statusKeyboard() }));
 

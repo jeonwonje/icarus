@@ -5,6 +5,7 @@ import { log } from '../log.js';
 import { buildIcarusServer } from '../mcp/icarusTools.js';
 import type { TurnJob, TurnResult } from '../queue.js';
 import { sendOwner } from '../telegram/send.js';
+import { ownerVoice } from './ownerVoice.js';
 import { buildContextHook } from './contextHook.js';
 import { buildGuardHook } from './guard.js';
 import { composePersona } from './persona.js';
@@ -17,10 +18,7 @@ let lastAuthAlert = 0;
 async function authAlert(detail: string): Promise<void> {
   if (Date.now() - lastAuthAlert < 60 * 60_000) return;
   lastAuthAlert = Date.now();
-  await sendOwner(
-    `⚠ Claude auth failed (${detail}). The OAuth token is likely dead — run \`claude setup-token\`, ` +
-      `paste the new token into icarus\\.env as CLAUDE_CODE_OAUTH_TOKEN, then /restart.`,
-  );
+  await sendOwner(ownerVoice.ops.authFailed(detail));
 }
 
 function buildEnv(): Record<string, string | undefined> {

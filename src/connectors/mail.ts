@@ -7,6 +7,7 @@ import { cfg } from '../config.js';
 import { getSetting, now, setSetting } from '../db.js';
 import { log } from '../log.js';
 import { submitTurn } from '../queue.js';
+import { ownerVoice } from '../agent/ownerVoice.js';
 import { DIGEST_STYLE } from '../agent/digestStyle.js';
 import { sendOwner } from '../telegram/send.js';
 import { isProcessed, markProcessed } from './store.js';
@@ -118,7 +119,7 @@ export async function pollMailDrop(): Promise<void> {
     checkStall();
   } catch (e) {
     log.error({ err: String(e) }, 'mail poll failed');
-    await sendOwner(`mail pipeline error: ${String(e).slice(0, 300)}`);
+    await sendOwner(ownerVoice.ops.mailPipelineError(String(e)));
   }
 }
 
@@ -128,7 +129,7 @@ function checkStall(): void {
   if (Date.now() - new Date(last).getTime() < STALL_MS) return;
   if (getSetting('mail_stall_notified') === last) return; // already nudged for this stall
   setSetting('mail_stall_notified', last);
-  void sendOwner(`mail export seems stalled — last fresh export ${last.slice(0, 16)}. Is the daily export task still running?`);
+  void sendOwner(ownerVoice.ops.mailStalled(last));
 }
 
 // ---- extraction ------------------------------------------------------------
