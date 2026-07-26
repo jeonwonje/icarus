@@ -219,18 +219,3 @@ export function renderTelegramChat(view: TelegramChatStatusView): Rendered {
   kb.text('« dialogs', `tg:page:0:${queryRef('')}`);
   return { text: lines.join('\n'), keyboard: kb };
 }
-
-export function renderTelegramRemovePrompt(title: string, peerKey: string): Rendered {
-  const peer = peerRef(peerKey);
-  return {
-    text: [
-      `remove the local archive for "${title}"?`,
-      '',
-      'messages, media, and snapshots stored on this machine will be deleted.',
-      'Telegram itself is untouched.',
-    ].join('\n'),
-    keyboard: new InlineKeyboard()
-      .text('yes, remove', `tg:remove:${peer}`)
-      .text('cancel', `tg:chat:${peer}`),
-  };
-}

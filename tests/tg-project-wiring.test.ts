@@ -144,7 +144,7 @@ test('seedSystemRows inserts weekly project sweep job', () => {
     | undefined;
   assert.ok(row);
   assert.equal(row.cron, '0 9 * * 1');
-  assert.match(row.prompt, /proposalEngine\.sweep/);
+  assert.match(row.prompt, /historicalPass \+ notify pending/);
 });
 
 test('fire on project sweep does not enqueue an agent turn', async () => {

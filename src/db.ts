@@ -274,6 +274,9 @@ const MIGRATIONS: string[] = [
     lessons TEXT NOT NULL
   );
   `,
+  `
+  DROP TABLE IF EXISTS connector_state;
+  `,
 ];
 
 export let db: DatabaseSync;

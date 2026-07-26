@@ -95,17 +95,20 @@ export const cfg = {
   dbPath: path.join(ROOT, 'state', 'icarus.db'),
   shutdownMarker: path.join(ROOT, 'state', '.clean-shutdown'),
 
-  // Paths Claude sessions must never write (guard.ts). Compared case-insensitively.
-  protectedPaths: [
-    path.join(DESKTOP, 'CLAUDE.md'),
-    path.join(DESKTOP, 'wiki', 'CLAUDE.md'),
-    path.join(process.env.USERPROFILE ?? 'C:\\Users\\jeon', '.claude'),
-  ],
-
   hardCapMs: 30 * 60_000,
   reflectionCapMs: 45 * 60_000,
   idleCapMs: 10 * 60_000,
 };
+
+/** Env for Claude Agent SDK calls — OAuth token only, never ANTHROPIC_API_KEY. */
+export function buildSdkEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    CLAUDE_CODE_OAUTH_TOKEN: cfg.oauthToken,
+  };
+  delete env.ANTHROPIC_API_KEY;
+  return env;
+}
 
 export const OWNER_JID = 'dm:owner';
 export const REFLECTION_JOB = 'reflection';

@@ -1,5 +1,5 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { cfg, OWNER_JID, resolveModel } from '../config.js';
+import { cfg, OWNER_JID, resolveModel, buildSdkEnv } from '../config.js';
 import { db, getSetting, now } from '../db.js';
 import { log } from '../log.js';
 import { buildIcarusServer } from '../mcp/icarusTools.js';
@@ -19,15 +19,6 @@ async function authAlert(detail: string): Promise<void> {
   if (Date.now() - lastAuthAlert < 60 * 60_000) return;
   lastAuthAlert = Date.now();
   await sendOwner(ownerVoice.ops.authFailed(detail));
-}
-
-function buildEnv(): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    CLAUDE_CODE_OAUTH_TOKEN: cfg.oauthToken,
-  };
-  delete env.ANTHROPIC_API_KEY; // subscription auth only
-  return env;
 }
 
 function composePrompt(job: TurnJob): string {
@@ -84,7 +75,7 @@ export async function runTurn(job: TurnJob): Promise<TurnResult> {
             ...(job.browser && cfg.browserMcp ? { browser: { type: 'stdio' as const, ...cfg.browserMcp } } : {}),
           },
           strictMcpConfig: true,
-          env: buildEnv(),
+          env: buildSdkEnv(),
           hooks: {
             UserPromptSubmit: [{ hooks: [buildContextHook(job.jid, job.kind, job.lines.length)] }],
             PreToolUse: [

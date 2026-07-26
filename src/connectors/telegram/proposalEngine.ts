@@ -1,7 +1,4 @@
 import { createHash } from 'node:crypto';
-import type { TelegramArchiveQuery } from './archiveQuery.js';
-import type { TelegramArchiveStore } from './archiveStore.js';
-import type { ProjectProposal, TelegramProjectStore } from './projectStore.js';
 import { tokenize, type WikiProject } from './wikiProjects.js';
 
 export interface MatchResult {
@@ -101,24 +98,4 @@ export function matchChatToProjects(input: {
   }
 
   return best;
-}
-
-export class ProposalEngine {
-  constructor(
-    private readonly deps: {
-      archive: TelegramArchiveStore;
-      projects: TelegramProjectStore;
-      wikiDir: string;
-      query?: TelegramArchiveQuery;
-    },
-  ) {}
-
-  /** Title matching removed — LLM triage/historical passes enqueue proposals via WikiFactWriter. */
-  considerChat(_peerKey: string): ProjectProposal | null {
-    return null;
-  }
-
-  sweep(): ProjectProposal[] {
-    return [];
-  }
 }

@@ -3,7 +3,7 @@ import { readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { Cron } from 'croner';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { cfg, resolveModel } from '../config.js';
+import { cfg, resolveModel, buildSdkEnv } from '../config.js';
 import { db, getSetting, now, setSetting } from '../db.js';
 import { ownerVoice } from '../agent/ownerVoice.js';
 import { log } from '../log.js';
@@ -22,15 +22,13 @@ export function trackTokenAge(): void {
 async function runCanary(): Promise<void> {
   // Minimal 1-turn query — if auth is dead this fails within seconds.
   try {
-    const env: Record<string, string | undefined> = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: cfg.oauthToken };
-    delete env.ANTHROPIC_API_KEY;
     let ok = false;
     for await (const msg of query({
       prompt: 'reply with exactly: ok',
       options: {
         model: resolveModel('haiku'),
         cwd: cfg.stateDir,
-        env,
+        env: buildSdkEnv(),
         settingSources: [],
         tools: [],
         maxTurns: 1,

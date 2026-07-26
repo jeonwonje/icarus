@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { cfg, resolveModel } from '../config.js';
+import { cfg, resolveModel, buildSdkEnv } from '../config.js';
 import { db, now } from '../db.js';
 import { log } from '../log.js';
 
@@ -32,15 +32,6 @@ export function listCases(): EvalCase[] {
   return cases;
 }
 
-function buildEnv(): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    CLAUDE_CODE_OAUTH_TOKEN: cfg.oauthToken,
-  };
-  delete env.ANTHROPIC_API_KEY;
-  return env;
-}
-
 /** One cheap isolated single-turn query — no tools, no settings, no session persistence. */
 async function oneShot(prompt: string, personaAppend?: string): Promise<string> {
   const res = query({
@@ -48,7 +39,7 @@ async function oneShot(prompt: string, personaAppend?: string): Promise<string> 
     options: {
       model: resolveModel('haiku'),
       cwd: cfg.stateDir,
-      env: buildEnv(),
+      env: buildSdkEnv(),
       settingSources: [],
       tools: [],
       maxTurns: 1,

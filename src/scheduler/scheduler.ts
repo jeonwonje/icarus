@@ -152,7 +152,7 @@ export function seedSystemRows(): void {
       ts,
     );
   if (!db.prepare('SELECT id FROM schedules WHERE name=?').get(PROJECT_SWEEP_JOB))
-    insert.run(PROJECT_SWEEP_JOB, '0 9 * * 1', '(code — proposalEngine.sweep)', ts, ts);
+    insert.run(PROJECT_SWEEP_JOB, '0 9 * * 1', '(code — historicalPass + notify pending)', ts, ts);
 }
 
 export function fire(id: number, opts?: { catchUp?: boolean }): void {

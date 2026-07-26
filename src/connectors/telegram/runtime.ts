@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { InlineKeyboard } from 'grammy';
+import { ownerVoice } from '../../agent/ownerVoice.js';
 import { cfg } from '../../config.js';
 import { db } from '../../db.js';
 import { submitTurn } from '../../queue.js';
@@ -15,9 +16,7 @@ import {
 import { TelegramBlobStore } from './blobStore.js';
 import { LinkSnapshotter } from './linkSnapshot.js';
 import { TelegramHistoricalPass } from './historicalPass.js';
-import { ProposalEngine } from './proposalEngine.js';
 import { type ProjectProposal, TelegramProjectStore } from './projectStore.js';
-import { renderProjectProposal } from './projectUi.js';
 import { TelegramSyncManager } from './syncManager.js';
 import { TelegramTriageBridge } from './triage.js';
 import { listWikiProjects } from './wikiProjects.js';
@@ -62,7 +61,6 @@ export class TelegramArchiveRuntime {
     private readonly bridge: TelegramTriageBridge,
     private readonly historicalPass: TelegramHistoricalPass,
     private readonly projectStore: TelegramProjectStore,
-    private readonly proposalEngine: ProposalEngine,
     private readonly notifyKeyboard: (text: string, keyboard: InlineKeyboard) => Promise<void>,
   ) {}
 
@@ -82,12 +80,6 @@ export class TelegramArchiveRuntime {
     const store = new TelegramArchiveStore(database);
     const archiveQuery = new TelegramArchiveQuery(store);
     const projectStore = new TelegramProjectStore(database);
-    const proposalEngine = new ProposalEngine({
-      archive: store,
-      projects: projectStore,
-      wikiDir: cfg.wikiDir,
-      query: archiveQuery,
-    });
     const blobs = new TelegramBlobStore(archiveDir);
     const snapshots = new LinkSnapshotter();
     const factWriter = new WikiFactWriter({
@@ -99,11 +91,11 @@ export class TelegramArchiveRuntime {
     const notifyProjectProposal = async (proposal: ProjectProposal): Promise<void> => {
       const chat = store.getChat(proposal.peerKey);
       if (!chat) return;
-      const rendered = renderProjectProposal({
+      const rendered = ownerVoice.proposal.telegramMap({
         id: proposal.id,
         chatTitle: chat.title,
         wikiProject: proposal.wikiProject,
-        evidence: proposal.evidence,
+        why: proposal.evidence,
       });
       await notifyKeyboard(rendered.text, rendered.keyboard);
       projectStore.markProposalNotified(proposal.id);
@@ -154,7 +146,6 @@ export class TelegramArchiveRuntime {
       bridge,
       historicalPass,
       projectStore,
-      proposalEngine,
       notifyKeyboard,
     );
   }
@@ -277,11 +268,11 @@ export class TelegramArchiveRuntime {
   async notifyProjectProposal(proposal: ProjectProposal): Promise<void> {
     const chat = this.store.getChat(proposal.peerKey);
     if (!chat) return;
-    const rendered = renderProjectProposal({
+    const rendered = ownerVoice.proposal.telegramMap({
       id: proposal.id,
       chatTitle: chat.title,
       wikiProject: proposal.wikiProject,
-      evidence: proposal.evidence,
+      why: proposal.evidence,
     });
     await this.notifyKeyboard(rendered.text, rendered.keyboard);
     this.projectStore.markProposalNotified(proposal.id);

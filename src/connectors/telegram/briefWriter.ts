@@ -136,31 +136,6 @@ function renderBriefMarkdown(
   return lines.join('\n');
 }
 
-export function writeBriefAndMemory(input: {
-  wikiDir: string;
-  memoryDir: string;
-  wikiProject: string;
-  chatTitle: string;
-  peerKey: string;
-  query: TelegramArchiveQuery;
-  archive: TelegramArchiveStore;
-}): { briefPath: string } {
-  const slug = chatSlug(input.chatTitle);
-  const briefRel = `${input.wikiProject}/telegram-${slug}.md`;
-  const briefFull = assertSafeWikiPath(input.wikiDir, briefRel);
-  const notes = collectNotes({
-    query: input.query,
-    archive: input.archive,
-    peerKey: input.peerKey,
-    wikiProject: input.wikiProject,
-  });
-  const markdown = renderBriefMarkdown(input.chatTitle, input.peerKey, briefRel, notes);
-  mkdirSync(path.dirname(briefFull), { recursive: true });
-  writeFileSync(briefFull, markdown, 'utf8');
-  upsertMemoryPointer(input.memoryDir, input.wikiProject, input.chatTitle);
-  return { briefPath: briefRel };
-}
-
 export interface AppendFact {
   claim: string;
   cites: string[];
