@@ -2,12 +2,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Cron } from 'croner';
 import { convert } from 'html-to-text';
-import { DIGEST_STYLE } from '../agent/digestStyle.js';
-import { cfg } from '../config.js';
-import { getSetting, now, setSetting } from '../db.js';
-import { log } from '../log.js';
-import { submitTurn } from '../queue.js';
-import { sendOwner } from '../telegram/send.js';
+import { DIGEST_STYLE } from '../../agent/digestStyle.js';
+import { cfg } from '../../config.js';
+import { getSetting, now, setSetting } from '../../db.js';
+import { log } from '../../log.js';
+import { submitTurn } from '../../queue.js';
+import { sendOwner } from '../../telegram/send.js';
+import { isProcessed, markProcessed } from '../../connectors/store.js';
+import { getCanvasConfig } from './config.js';
 import {
   CanvasAuthError,
   CanvasRateLimitError,
@@ -23,7 +25,6 @@ import {
   missingItemId,
   type CanvasCourse,
 } from './canvasIds.js';
-import { isProcessed, markProcessed } from './store.js';
 
 export type CanvasPollDeps = {
   client: CanvasClient;
@@ -61,10 +62,6 @@ function courseIdFromContextCode(code: unknown): number | null {
   return m ? Number(m[1]) : null;
 }
 
-export function canvasConfigured(): boolean {
-  return !!(cfg.canvasBaseUrl && cfg.canvasApiToken);
-}
-
 export function formatCanvasStatusLine(p: {
   baseUrl: string;
   status: string;
@@ -76,9 +73,9 @@ export function formatCanvasStatusLine(p: {
 }
 
 export function canvasStatusLine(): string | null {
-  if (!cfg.canvasBaseUrl || !cfg.canvasApiToken) return null;
+  const { baseUrl } = getCanvasConfig();
   return formatCanvasStatusLine({
-    baseUrl: cfg.canvasBaseUrl,
+    baseUrl,
     status: getSetting('canvas_last_poll_status') || 'never',
     pollAt: getSetting('canvas_last_poll_at'),
     digestAt: getSetting('canvas_last_digest_at'),
@@ -254,11 +251,9 @@ ${DIGEST_STYLE}`;
 }
 
 function buildProductionDeps(): CanvasPollDeps {
+  const { baseUrl, token } = getCanvasConfig();
   return {
-    client: createCanvasClient({
-      baseUrl: cfg.canvasBaseUrl!,
-      token: cfg.canvasApiToken!,
-    }),
+    client: createCanvasClient({ baseUrl, token }),
     isSeen: (id) => isProcessed('canvas', id),
     markSeen: (id) => markProcessed('canvas', id),
     writeDelta: (md) => productionWriteDelta(md, now()),
@@ -293,11 +288,6 @@ export async function runCanvasPoll(opts: {
   reply?: (text: string) => void | Promise<void>;
   deps?: CanvasPollDeps;
 }): Promise<void> {
-  if (!opts.deps && !canvasConfigured()) {
-    await respond(opts, 'Canvas not configured');
-    return;
-  }
-
   const deps = opts.deps ?? buildProductionDeps();
 
   if (deps.getStatus() === 'auth' && !opts.force) return;
@@ -370,7 +360,6 @@ export async function runCanvasPoll(opts: {
 }
 
 export function registerCanvasWatcher(): void {
-  if (!canvasConfigured()) return;
   clearCanvasAuthGate();
   new Cron('0 8 * * *', { protect: true, timezone: cfg.tz }, () => void runCanvasPoll({ force: false }));
   new Cron('0 18 * * *', { protect: true, timezone: cfg.tz }, () => void runCanvasPoll({ force: false }));

@@ -17,6 +17,10 @@ export function getModuleHost(): ModuleHost {
   return moduleHost;
 }
 
+export function getHostSnapshot(): HostSnapshot {
+  return (getModuleHost() as ModuleHost & { snapshot(): HostSnapshot }).snapshot();
+}
+
 type HostState = {
   mcps: HostSnapshot['mcps'];
   tools: SdkMcpToolDefinition[];

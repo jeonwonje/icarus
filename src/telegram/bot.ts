@@ -3,7 +3,6 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { cfg, MODEL_ALIASES, OWNER_JID, resolveModel, ROOT } from '../config.js';
-import { formatCanvasStatusLine } from '../connectors/canvas.js';
 import {
   telegramHealth,
   telegramRuntime,
@@ -27,6 +26,8 @@ import { clearPending, hasPending, queueStatus, submitTurn, abortRunning } from 
 import { ownerVoice } from '../agent/ownerVoice.js';
 import { clearSession, getSession } from '../agent/sessions.js';
 import { decideProposal, latestPending, listPersonaVersions, revertToVersion } from '../improve/proposals.js';
+import { getHostSnapshot } from '../modules/host.js';
+import type { HostSnapshot, ModuleHost } from '../modules/types.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
 import { listShelvableProjects } from '../rawProjects.js';
 import { blobPathForHash, fileToRaw } from '../rawShelf.js';
@@ -48,6 +49,16 @@ import {
 } from './ui.js';
 
 const bootedAt = Date.now();
+
+function moduleStatusLines(): string[] {
+  try {
+    return getHostSnapshot()
+      .statusLines.map((fn) => fn())
+      .filter((line): line is string => line != null);
+  } catch {
+    return [];
+  }
+}
 
 let typingStop: (() => void) | null = null;
 let stopUi: { timer: NodeJS.Timeout; msgId: number | null } | null = null;
@@ -137,16 +148,7 @@ async function statusText(): Promise<string> {
     ...(cfg.mailDropDir
       ? [`▸ mail · export ${getSetting('mail_last_export_at')?.slice(0, 16) ?? 'never'} · parse ${getSetting('mail_last_parse') ?? 'never'}`]
       : []),
-    ...(cfg.canvasBaseUrl && cfg.canvasApiToken
-      ? [
-          formatCanvasStatusLine({
-            baseUrl: cfg.canvasBaseUrl,
-            status: getSetting('canvas_last_poll_status') || 'never',
-            pollAt: getSetting('canvas_last_poll_at'),
-            digestAt: getSetting('canvas_last_digest_at'),
-          }),
-        ]
-      : []),
+    ...moduleStatusLines(),
     `▸ tg · ${renderTelegramStatusLine(telegramHealth())}`,
     `▸ token age · ${tokenAge} · db ${dbSize}`,
   ].join('\n');
@@ -736,20 +738,6 @@ export function createBot(): Bot {
     setTimeout(() => process.exit(0), 500);
   });
 
-  bot.command('canvas', async (ctx) => {
-    const { runCanvasPoll, canvasConfigured } = await import('../connectors/canvas.js');
-    if (!canvasConfigured()) {
-      return ctx.reply('Canvas not configured (set CANVAS_BASE_URL and CANVAS_API_TOKEN).');
-    }
-    await ctx.reply('checking Canvas…');
-    await runCanvasPoll({
-      force: true,
-      reply: async (text) => {
-        await ctx.reply(text);
-      },
-    });
-  });
-
   bot.command('stop', async (ctx) => {
     await ctx.reply(abortRunning() ? 'stopping the current turn…' : 'nothing is running.');
   });
@@ -814,17 +802,32 @@ const MENU_COMMANDS = [
   { command: 'revert', description: 'roll back a persona change' },
   { command: 'tg', description: 'manage personal Telegram archive' },
   { command: 'archive', description: 'search archived Telegram messages' },
-  { command: 'canvas', description: 'check Canvas LMS for new items' },
   { command: 'restart', description: 'restart Icarus' },
 ];
 
-export async function registerCommands(bot: Bot): Promise<void> {
+export function applyModuleCommands(
+  bot: Bot,
+  host: ModuleHost & { snapshot(): HostSnapshot },
+): void {
+  for (const cmd of host.snapshot().commands) {
+    bot.command(cmd.name, cmd.handler);
+  }
+}
+
+export async function registerCommands(
+  bot: Bot,
+  host?: ModuleHost & { snapshot(): HostSnapshot },
+): Promise<void> {
+  const moduleCmds = host
+    ? host.snapshot().commands.map((c) => ({ command: c.name, description: c.description }))
+    : [];
+  const allCommands = [...MENU_COMMANDS, ...moduleCmds];
   // Telegram resolves the menu by scope precedence, narrowest first, and the
   // owner talks to Icarus in a DM — so writing only the default scope leaves
   // any stale all_private_chats list shadowing it forever. Write the scope we
   // actually use, and clear the broader ones so nothing outranks it later.
-  await bot.api.setMyCommands(MENU_COMMANDS, { scope: { type: 'all_private_chats' } });
-  await bot.api.setMyCommands(MENU_COMMANDS);
+  await bot.api.setMyCommands(allCommands, { scope: { type: 'all_private_chats' } });
+  await bot.api.setMyCommands(allCommands);
   await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
 }
 

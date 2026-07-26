@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -6,12 +6,12 @@ import {
   CanvasAuthError,
   CanvasRateLimitError,
   type CanvasClient,
-} from '../src/connectors/canvasClient.js';
+} from '../../../src/modules/canvas/canvasClient.js';
 import {
   clearCanvasAuthGate,
   runCanvasPoll,
   type CanvasPollDeps,
-} from '../src/connectors/canvas.js';
+} from '../../../src/modules/canvas/canvas.js';
 
 function emptyClient(overrides: Partial<CanvasClient> = {}): CanvasClient {
   return {

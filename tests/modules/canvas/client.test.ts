@@ -1,8 +1,8 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CanvasAuthError, CanvasRateLimitError, createCanvasClient } from '../src/connectors/canvasClient.js';
+import { CanvasAuthError, CanvasRateLimitError, createCanvasClient } from '../../../src/modules/canvas/canvasClient.js';
 
 test('Authorization Bearer header and strips trailing slash', async () => {
   const calls: string[] = [];

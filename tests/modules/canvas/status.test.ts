@@ -1,8 +1,12 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canvasStatusLine, formatCanvasStatusLine } from '../src/connectors/canvas.js';
+import { openDb } from '../../../src/db.js';
+import { canvasConfig } from '../../../src/modules/canvas/config.js';
+import { canvasStatusLine, formatCanvasStatusLine } from '../../../src/modules/canvas/canvas.js';
+
+openDb();
 
 test('formatCanvasStatusLine strips scheme/trailing slash and slices timestamps', () => {
   assert.equal(
@@ -28,6 +32,9 @@ test('formatCanvasStatusLine uses never when timestamps missing', () => {
   );
 });
 
-test('canvasStatusLine returns null when Canvas env unset', () => {
-  assert.equal(canvasStatusLine(), null);
+test('canvasStatusLine returns formatted line after config init', () => {
+  canvasConfig({ selftest: true });
+  const line = canvasStatusLine();
+  assert.ok(line);
+  assert.match(line!, /selftest\.instructure\.com/);
 });

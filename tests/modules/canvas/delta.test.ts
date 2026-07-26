@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -8,8 +8,8 @@ import {
   filterActiveCourses,
   gradeItemId,
   missingItemId,
-} from '../src/connectors/canvasIds.js';
-import { classifyNew, renderDeltaMd, type CanvasCandidate } from '../src/connectors/canvasDelta.js';
+} from '../../../src/modules/canvas/canvasIds.js';
+import { classifyNew, renderDeltaMd, type CanvasCandidate } from '../../../src/modules/canvas/canvasDelta.js';
 
 test('item id helpers', () => {
   assert.equal(announcementItemId(9), 'announcement:9');

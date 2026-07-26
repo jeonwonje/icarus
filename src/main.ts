@@ -28,6 +28,8 @@ for (const d of [
 if (process.argv.includes('--selftest')) {
   process.env.ICARUS_CALENDAR_MCP ??= JSON.stringify({ command: process.execPath, args: ['-e', ''] });
   process.env.ICARUS_BROWSER_MCP ??= JSON.stringify({ command: process.execPath, args: ['-e', ''] });
+  process.env.CANVAS_BASE_URL ??= 'https://selftest.instructure.com';
+  process.env.CANVAS_API_TOKEN ??= 'selftest';
 
   const { createModuleHost, setModuleHost, registerAll, MODULES } = await import('./modules/registry.js');
   const selftestHost = createModuleHost();
@@ -67,7 +69,7 @@ if (process.argv.includes('--selftest')) {
   console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}`);
   console.log(`  modules: ${MODULES.map((m) => m.id).join(', ')}`);
   console.log(`  tg config: ${cfg.tgConfigState}`);
-  console.log(`  canvas: ${cfg.canvasBaseUrl && cfg.canvasApiToken ? cfg.canvasBaseUrl : 'unset'}`);
+  console.log(`  canvas: ${process.env.CANVAS_BASE_URL ?? 'unset'}`);
   console.log(`  tg archive: ${tgMessages} messages · ${tgMedia} media · ${tgPending} pending work`);
   console.log(`  tg update positions: ${tgPositions || 'none'}`);
   console.log(`  persona: ${composePersona().length} chars`);
@@ -97,7 +99,7 @@ await registerAll(moduleHost);
 setModuleHost(moduleHost);
 
 const { ownerVoice } = await import('./agent/ownerVoice.js');
-const { createBot, registerCommands } = await import('./telegram/bot.js');
+const { createBot, applyModuleCommands, registerCommands } = await import('./telegram/bot.js');
 const { setBot, sendOwner } = await import('./telegram/send.js');
 const { initQueue, submitTurn } = await import('./queue.js');
 const { runTurn } = await import('./agent/runner.js');
@@ -108,6 +110,7 @@ const { ensurePersonaBaseline } = await import('./improve/proposals.js');
 
 const bot = createBot();
 setBot(bot);
+applyModuleCommands(bot, moduleHost);
 
 initQueue(
   async (job) => {
@@ -139,8 +142,6 @@ trackTokenAge();
 registerCodeJobs();
 const { registerMailWatcher } = await import('./connectors/mail.js');
 registerMailWatcher();
-const { registerCanvasWatcher } = await import('./connectors/canvas.js');
-registerCanvasWatcher();
 // Personal Telegram is independent of the owner bot: bad credentials must not crash-loop Icarus.
 try {
   const { startTelegramRuntime } = await import('./connectors/telegram/runtime.js');
@@ -192,7 +193,7 @@ process.on('SIGINT', () => {
 
 // Best-effort boot niceties — a transient API failure here must not crash-loop the service.
 try {
-  await registerCommands(bot);
+  await registerCommands(bot, moduleHost);
   const cleanShutdown = existsSync(cfg.shutdownMarker);
   if (cleanShutdown) rmSync(cfg.shutdownMarker, { force: true });
   if (!getSetting('booted_once')) {
@@ -207,6 +208,10 @@ try {
 
 // Fire missed catch_up schedules only after the bot can DM results.
 scheduler.catchUpMissed();
+
+for (const fn of moduleHost.snapshot().startHooks) {
+  await fn();
+}
 
 log.info('starting long-poll');
 await bot.start({

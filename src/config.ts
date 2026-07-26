@@ -28,8 +28,6 @@ const Env = z.object({
   ICARUS_MODEL: z.string().default('sonnet'),
   ICARUS_TZ: z.string().optional(),
   ICARUS_MAIL_DROP: z.string().optional(),
-  CANVAS_BASE_URL: z.string().optional(),
-  CANVAS_API_TOKEN: z.string().optional(),
   TG_API_ID: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().int().positive().optional()),
   TG_API_HASH: z.string().optional(),
   TG_SESSION: z.string().optional(),
@@ -50,8 +48,6 @@ export const cfg = {
   defaultModel: env.ICARUS_MODEL,
   tz: env.ICARUS_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
   mailDropDir: env.ICARUS_MAIL_DROP || undefined,
-  canvasBaseUrl: (env.CANVAS_BASE_URL || '').replace(/\/$/, '') || undefined,
-  canvasApiToken: env.CANVAS_API_TOKEN || undefined,
 
   tgApiId: env.TG_API_ID,
   tgApiHash: env.TG_API_HASH || undefined,
