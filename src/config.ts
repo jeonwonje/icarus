@@ -30,6 +30,8 @@ const Env = z.object({
   ICARUS_MAIL_DROP: z.string().optional(),
   ICARUS_BROWSER_MCP: z.string().optional(),
   ICARUS_CALENDAR_MCP: z.string().optional(),
+  CANVAS_BASE_URL: z.string().optional(),
+  CANVAS_API_TOKEN: z.string().optional(),
   TG_API_ID: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().int().positive().optional()),
   TG_API_HASH: z.string().optional(),
   TG_SESSION: z.string().optional(),
@@ -67,6 +69,8 @@ export const cfg = {
   mailDropDir: env.ICARUS_MAIL_DROP || undefined,
   browserMcp: parseMcpJson('ICARUS_BROWSER_MCP', env.ICARUS_BROWSER_MCP),
   calendarMcp: parseMcpJson('ICARUS_CALENDAR_MCP', env.ICARUS_CALENDAR_MCP),
+  canvasBaseUrl: (env.CANVAS_BASE_URL || '').replace(/\/$/, '') || undefined,
+  canvasApiToken: env.CANVAS_API_TOKEN || undefined,
 
   tgApiId: env.TG_API_ID,
   tgApiHash: env.TG_API_HASH || undefined,
