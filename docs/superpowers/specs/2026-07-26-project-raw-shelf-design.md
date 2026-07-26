@@ -106,17 +106,19 @@ auto-shelves.
 `raw_shelf` (Icarus SQLite)
 : Index of shelved files for fast dedup: `(project, sha256) → relative path` (plus bytes,
   created_at). Disk under `Desktop/<project>/raw/` is what humans browse; the table is an
-  accelerator and must be rebuildable by hashing `raw/` if drifted.
+  accelerator. **Design invariant:** a full resync could be done by hashing each project's
+  `raw/` and rewriting rows. **v1** only repairs on the miss path (index row points at a
+  missing file → re-shelf that one object). A bulk rebuild command is a follow-on.
 
 DM ingest path (`src/telegram/bot.ts` + UI)
-: Existing ingest button / captioned ingest resolves project (sticky if any context
-  applies — typically picker for plain DM), calls `fileToRaw` on the inbox path, then
-  submits deep-ingest against the **returned raw path** (not the inbox path).
+: Owner-bot DM has **no** `tg_project_mappings` peer — always show the project picker.
+  Then `fileToRaw` on the inbox path and deep-ingest on the **returned raw path** (not
+  inbox).
 
 Archive ingest path (triage / owner action)
 : Intentional action carries peer, message id, media key / blob hash and filename.
-  Same sticky-or-picker → `fileToRaw` from blob → deep-ingest on raw path. Sync manager
-  does not call `fileToRaw`.
+  Sticky mapping for that `peerKey` if present, else picker → `fileToRaw` from blob →
+  deep-ingest on raw path. Sync manager does not call `fileToRaw`.
 
 Wiki / deep-ingest
 : Unchanged skill semantics: locators + content hash idempotency. Prompt and persona
@@ -149,19 +151,20 @@ Wiki / deep-ingest
 
 ### Project resolution
 
-1. If the peer (archive chat) or applicable context has a sticky `tg_project_mappings`
-   row → use that wiki project slug.
-2. Else show inline keyboard of known wiki project slugs (from `wiki/` / Desktop folder
-   intersection).
-3. Refuse if the chosen slug has no matching `Desktop/<project>/` directory.
+1. **Archive ingest:** if `tg_project_mappings` has a sticky row for that chat's
+   `peerKey` → use its wiki project slug.
+2. **Owner-bot DM ingest:** no archive peer → **always** show the project picker (sticky
+   does not apply). Captions/threads do not invent a sticky project in v1.
+3. Picker lists wiki project slugs that also exist as `Desktop/<project>/` folders.
+4. Refuse if the chosen slug has no matching Desktop directory.
 
 ### Flows
 
 **DM**
 
 1. Media still downloads to `inbox/<date>/` via `saveIncomingFile`.
-2. Ingest action (button or caption intent) → project resolve → `fileToRaw` →
-   `submitOwnerText` deep-ingest on raw path.
+2. Ingest action (button or caption intent) → **project picker** (no sticky) → `fileToRaw`
+   → `submitOwnerText` deep-ingest on raw path.
 3. Summarize / keep unchanged. Photos continue to the agent unless ingest is requested.
 
 **Archive**
