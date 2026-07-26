@@ -14,6 +14,7 @@ test('telegram migration creates archive tables and FTS5 index', () => {
     }[]
   ).map((r) => r.name);
   for (const expected of [
+    'raw_shelf',
     'tg_chats',
     'tg_import_jobs',
     'tg_links',
@@ -31,7 +32,7 @@ test('telegram migration creates archive tables and FTS5 index', () => {
   }
   assert.equal(
     (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version,
-    5,
+    6,
   );
 });
 
