@@ -188,10 +188,14 @@ function browserEntry(): StdioEntry {
   return entry;
 }
 
-/** The native host serves one transport at a time; killing the bridge wedges it for the next run. */
+/**
+ * The native host accepts exactly ONE MCP client per host lifetime, on any transport — verified
+ * against both the stdio bridge and a direct HTTP client, and its DELETE session verb answers 400.
+ * Ending stdin cleanly does not release it. Every connection after the first gets this error.
+ */
 const WEDGED = 'Already connected to a transport';
 const WEDGED_HINT =
-  'the native host is wedged by a previous unclean exit — kill the node process listening on 127.0.0.1:12306 and the extension will relaunch it';
+  'the native host already has a client bound — it accepts only one per lifetime. Kill the node process listening on 127.0.0.1:12306; the extension relaunches it within seconds.';
 
 async function main(): Promise<void> {
   const entry = browserEntry();
@@ -241,8 +245,12 @@ async function main(): Promise<void> {
       resolve(m.result);
     }
   });
+  let stderrSeen = '';
   child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk: string) => console.error(`[server] ${chunk.trimEnd()}`));
+  child.stderr.on('data', (chunk: string) => {
+    stderrSeen += chunk;
+    console.error(`[server] ${chunk.trimEnd()}`);
+  });
 
   let nextId = 1;
   const call = (method: string, params?: unknown): Promise<unknown> => {
@@ -286,12 +294,13 @@ async function main(): Promise<void> {
   clearTimeout(timer);
 
   const text = (tabs.content ?? []).map((c) => c.text ?? '').join('\n').trim();
-  if (tabs.isError || !text) {
-    await fail(`${tabsTool} returned no usable content: ${text || '(empty)'}`);
+  // The wedge surfaces on stderr, not in the tool result, so check both.
+  if (`${text}\n${stderrSeen}`.includes(WEDGED)) {
+    await fail(WEDGED_HINT);
     return;
   }
-  if (text.includes(WEDGED)) {
-    await fail(WEDGED_HINT);
+  if (tabs.isError || !text) {
+    await fail(`${tabsTool} returned no usable content: ${text || '(empty)'}`);
     return;
   }
 

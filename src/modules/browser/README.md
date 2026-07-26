@@ -66,11 +66,15 @@ Missing `mcpServers.browser` fails boot. Chrome being closed, the extension bein
 disconnected, or auto-connect being switched off after an extension update do **not** fail
 boot — turns simply lack browser tools. Report that plainly; do not retry-loop.
 
-## One transport at a time
+## One client per host lifetime — the main operational limit
 
-The native host serves **one MCP transport at a time**. A bridge process that exits without a
-clean MCP close — killed rather than shut down — leaves the server-side transport registered,
-and every later connection fails with HTTP 500 `Already connected to a transport`.
+The native host accepts **exactly one MCP client per host lifetime**, on any transport. Every
+connection after the first fails with HTTP 500 `Already connected to a transport`.
+
+Verified three ways: the stdio bridge wedges on the second run; a direct HTTP client wedges
+identically on its second `initialize`; and the host's `DELETE` session verb answers 400, so
+there is no teardown to call. Ending the bridge's stdin cleanly does **not** release it — this
+is the host's own lifecycle, not the bridge's.
 
 It hides well: no bridge process survives, `netstat` shows no connection to 12306, and both
 `initialize` and `tools/list` still succeed because the stdio bridge answers those **locally,
@@ -80,9 +84,14 @@ like "Chrome isn't connected" when the extension is fine.
 Clear it by killing the node process listening on `127.0.0.1:12306`; the extension relaunches
 it within seconds.
 
-`scripts/browser-probe.ts` shuts down by ending the child's stdin and waiting, rather than
-killing it, so running the probe does not wedge the host for the next run. Anything else that
-spawns the bridge must do the same.
+`scripts/browser-probe.ts` shuts down by ending the child's stdin rather than killing it, and
+detects this error on both the tool result and stderr so it reports the cause instead of
+blaming Chrome. It cannot avoid the wedge — nothing on our side can.
+
+**Unresolved:** the Agent SDK connects a browser MCP client per session, so browser tools are
+expected to work once and then fail until the host restarts. Whether that bites every turn or
+only some has not been measured against real turns. Until it is, treat the browser capability
+as needing a host restart between uses.
 
 ## Risk
 
