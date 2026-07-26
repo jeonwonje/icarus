@@ -71,10 +71,23 @@ reusable here, for three independent reasons:
 Node Native Messaging host. Architecturally identical to Claude in Chrome: it covers
 navigation, page reading, click/type/fill/scroll/drag interaction, screenshots, console and
 network capture, file upload, dialog and download handling, history, bookmarks, and tab
-listing. Its wire tool names are `chrome_`-prefixed (e.g. `chrome_computer`,
-`chrome_read_page`, `chrome_screenshot`); nothing on this branch has verified the exact set,
-so `scripts/browser-probe.ts` confirms the real names at runtime rather than this document
-asserting a list.
+listing. A live `tools/list` against extension **v1.0.0** confirmed **27 tools**, with mixed
+naming — most carry a `chrome_` prefix, but four do not:
+
+```
+get_windows_and_tabs, performance_start_trace, performance_stop_trace,
+performance_analyze_insight, chrome_read_page, chrome_computer, chrome_navigate,
+chrome_screenshot, chrome_close_tabs, chrome_switch_tab, chrome_get_web_content,
+chrome_network_request, chrome_network_capture, chrome_handle_download, chrome_history,
+chrome_bookmark_search, chrome_bookmark_add, chrome_bookmark_delete, chrome_javascript,
+chrome_click_element, chrome_fill_or_select, chrome_request_element_selection,
+chrome_keyboard, chrome_console, chrome_upload_file, chrome_handle_dialog,
+chrome_gif_recorder
+```
+
+`scripts/browser-probe.ts` discovers the tab-listing tool by matching the pattern
+`/windows_and_tabs/` rather than assuming a `chrome_` prefix — exactly what makes it robust
+against this inconsistency.
 
 Because it works through the extension rather than a debug port, it uses the live profile's
 cookies, sessions, and extensions with no relaunch and nothing moved.
@@ -92,11 +105,18 @@ change.
 stdio bridge. Use **stdio**:
 
 - It preserves the "local stdio server" invariant asserted in both root `CLAUDE.md` and
-  `src/modules/browser/README.md`, so neither statement has to be weakened.
-- It opens no listening port on the machine.
-- It avoids a real ambiguity: `mcp-chrome`'s README shows `"type": "streamableHttp"`, which
-  is another MCP client's spelling. Claude Code uses `"type": "http"`. Choosing stdio makes
-  the question moot rather than requiring it to be resolved by trial.
+  `src/modules/browser/README.md`, so neither statement has to be weakened — it keeps the
+  `.mcp.json` entry the same shape as `calendar`.
+- It avoids a real ambiguity: `mcp-chrome`'s README shows `"type": "streamableHttp"`, the
+  extension's own popup suggests `"type": "streamable-http"`, and Claude Code uses
+  `"type": "http"` — three spellings for one transport. Choosing stdio makes the question
+  moot rather than requiring it to be resolved by trial.
+
+**Confirmed live:** the native host's server listens on `127.0.0.1:12306` *regardless* of
+which transport Claude uses to reach it — before the extension was connected, requests to
+that port returned `ECONNREFUSED`; once connected, the port was listening. The port opens
+either way. Stdio does not avoid opening a listening port; it only changes how Claude
+reaches the server that already has one.
 
 ### Configuration
 
@@ -119,16 +139,28 @@ this one unverified.
 Performed by the owner in a normal terminal, in the same spirit as the calendar auth step —
 Icarus never runs it.
 
-1. `npm i -g mcp-chrome-bridge`
-2. `mcp-chrome-bridge register` — only if automatic registration does not fire. It writes an
+1. `npm i -g mcp-chrome-bridge --ignore-scripts` — **confirmed required**, not optional.
+   Plain `npm i -g mcp-chrome-bridge` fails on this machine and will fail on any machine
+   without a Visual Studio C++ toolchain: the bridge has a hard dependency on
+   `better-sqlite3@^11.6.0`, which has no prebuilt binary for Node 24, so npm falls back to
+   compiling it with node-gyp. The latest bridge version (1.0.31) still pins `^11.6.0`, so no
+   version avoids this.
+2. `mcp-chrome-bridge register` — **no longer optional.** `--ignore-scripts` also skips the
+   package's own postinstall, which is what would otherwise register the Native Messaging
+   host, so this step must be run by hand. It writes an
    `HKCU\Software\Google\Chrome\NativeMessagingHosts` entry, the same mechanism Claude Code
-   already uses here, so the pattern is proven on this machine.
+   already uses here — confirmed working on this machine.
 3. Load the `mcp-chrome` extension in Chrome (`chrome://extensions` → Developer mode → Load
    unpacked, or the Web Store listing).
 4. **Enable auto-connect in the extension popup.** Without it the extension attaches only
    when clicked, which a headless agent cannot do. This is the single most likely step to be
    missed.
 5. `/restart` Icarus.
+
+`better-sqlite3` backs the bridge's semantic-search / vector-embedding feature only.
+Skipping its compilation makes that feature unavailable — the browser tools this project
+actually uses (navigation, page reading, clicking, screenshots, tab listing, and the rest)
+do not depend on it and were verified working without it.
 
 ### Repository changes
 

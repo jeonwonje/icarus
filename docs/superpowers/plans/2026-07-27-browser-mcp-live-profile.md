@@ -15,7 +15,7 @@
 - Tests live outside `src/`, under `tests/`, matched by the glob `tests/**/*.test.ts`.
 - Commits are plain — no co-author trailers, no generated-with lines (a PreToolUse hook enforces this).
 - Never commit `.env`, anything under `state/` / `archive/`, or anything from the Desktop data root. **Desktop `.mcp.json` is Desktop data — it is edited but never committed.**
-- Transport for the browser server is **stdio**, not HTTP. This preserves the "local stdio server" wording in root `CLAUDE.md` and `src/modules/browser/README.md`, opens no listening port, and avoids the `"type": "streamableHttp"` vs `"type": "http"` spelling ambiguity between MCP clients.
+- Transport for the browser server is **stdio**, not HTTP. This preserves the "local stdio server" wording in root `CLAUDE.md` and `src/modules/browser/README.md` and keeps the `.mcp.json` entry the same shape as `calendar`; it also sidesteps a confirmed three-way spelling disagreement — `"type": "streamableHttp"` (mcp-chrome's README) vs `"type": "streamable-http"` (the extension's own popup) vs `"type": "http"` (Claude Code). It does **not** avoid opening a listening port: the native host's server listens on `127.0.0.1:12306` regardless of transport — confirmed by `ECONNREFUSED` on that port before the extension connected, and by the port listening afterwards.
 - The owner's Chrome profile is never moved, copied, or recreated.
 - No gate is added in front of browser actions. This is a deliberate owner decision recorded in the spec's Accepted Risks; do not add allowlists, denylists, or confirmation prompts.
 - No MCP servers are added or removed beyond swapping the `browser` entry. The roster stays `calendar` + `browser`.
@@ -420,9 +420,18 @@ permissions are granted by clicking in the extension UI.
 
 Run by the owner in a normal terminal — never through Claude.
 
-1. `npm i -g mcp-chrome-bridge`
-2. `mcp-chrome-bridge register` — only if automatic registration does not fire. It writes an
-   `HKCU\Software\Google\Chrome\NativeMessagingHosts` entry.
+1. `npm i -g mcp-chrome-bridge --ignore-scripts` — **confirmed required**, not optional.
+   Plain `npm i -g mcp-chrome-bridge` fails on this machine and will fail on any machine
+   without a Visual Studio C++ toolchain: the bridge has a hard dependency on
+   `better-sqlite3@^11.6.0`, which has no prebuilt binary for Node 24, so npm falls back to
+   compiling it with node-gyp. The latest bridge version (1.0.31) still pins `^11.6.0`, so no
+   version avoids this. Consequence: `better-sqlite3` backs the bridge's semantic-search /
+   vector feature only — that feature is unavailable, but the browser tools this project
+   uses do not depend on it and were verified working without it.
+2. `mcp-chrome-bridge register` — **no longer optional.** `--ignore-scripts` also skips the
+   package's own postinstall, which would otherwise register the Native Messaging host, so
+   this must be run by hand. It writes an `HKCU\Software\Google\Chrome\NativeMessagingHosts`
+   entry — confirmed working on this machine.
 3. Load the `mcp-chrome` extension in Chrome (`chrome://extensions` → Developer mode → Load
    unpacked, or the Web Store listing).
 4. **Enable auto-connect in the extension popup.** Without it the extension attaches only
@@ -430,11 +439,18 @@ Run by the owner in a normal terminal — never through Claude.
 5. Copy the `browser` entry from [`docs/mcp.json.example`](../../../docs/mcp.json.example)
    into Desktop `.mcp.json`.
 6. `npm run browser-probe` — confirms the server answers and prints the owner's live tabs.
-   Empty or unfamiliar tabs mean the extension is not attached.
+   Empty or unfamiliar tabs mean the extension is not attached. Must be run from the main
+   checkout, not a worktree: `src/config.ts` derives `DESKTOP` as `ROOT/..`, so from a
+   worktree it resolves to `...\.claude\worktrees` instead of the Desktop and never finds
+   `.mcp.json`.
 7. `/restart` Icarus.
 
-Transport is **stdio**, not the server's HTTP endpoint: it opens no listening port and avoids
-the `"type": "streamableHttp"` / `"type": "http"` spelling difference between MCP clients.
+Transport is **stdio**, not the server's HTTP endpoint. The native host's server listens on
+`127.0.0.1:12306` regardless of transport, so stdio does not avoid opening a port; it is
+chosen because it keeps the `.mcp.json` entry the same shape as `calendar`, and because it
+sidesteps a three-way spelling disagreement: `"type": "streamableHttp"` (mcp-chrome's
+README) vs `"type": "streamable-http"` (the extension's own popup) vs `"type": "http"`
+(Claude Code).
 
 Missing `mcpServers.browser` fails boot. Chrome being closed, the extension being
 disconnected, or auto-connect being switched off after an extension update do **not** fail
@@ -476,23 +492,37 @@ git commit -m "Point the browser module at mcp-chrome over stdio."
 - Consumes: `npm run browser-probe` from Task 1; the `browser` entry from `docs/mcp.json.example` in Task 2.
 - Produces: a working browser capability. Nothing downstream in code.
 
-**This task is mostly the owner's to run, not the agent's.** Steps 1–4 install software and load a browser extension on the owner's live machine; an agent must not perform them unattended. The agent's part is steps 5–8: making the config edit, running the probe, and reporting honestly.
+**This task is mostly the owner's to run, not the agent's.** Steps 1–4 install software and load a browser extension on the owner's live machine; an agent must not perform them unattended. Step 5 merges the branch and relocates execution to the main checkout. The agent's part is steps 6–9: making the config edit, running the probe, and reporting honestly.
 
 - [ ] **Step 1 (owner): Install the bridge**
 
 ```powershell
-npm i -g mcp-chrome-bridge
+npm i -g mcp-chrome-bridge --ignore-scripts
 ```
 
-- [ ] **Step 2 (owner): Confirm the native host registered**
+`--ignore-scripts` is **confirmed required**, not optional. Plain `npm i -g mcp-chrome-bridge`
+fails on this machine and will fail on any machine without a Visual Studio C++ toolchain: the
+bridge has a hard dependency on `better-sqlite3@^11.6.0`, which has no prebuilt binary for
+Node 24, so npm falls back to compiling it with node-gyp. The latest bridge version (1.0.31)
+still pins `^11.6.0`, so no version avoids this. Consequence: `better-sqlite3` backs the
+bridge's semantic-search / vector feature only — that feature is unavailable, but the browser
+tools this project uses do not depend on it and were verified working without it.
+
+- [ ] **Step 2 (owner): Register the native host**
+
+`--ignore-scripts` also skips the package's own postinstall, which would otherwise register
+the Native Messaging host, so this step is **no longer optional** — run it unconditionally:
+
+```powershell
+mcp-chrome-bridge register
+```
 
 ```powershell
 Get-ChildItem 'HKCU:\Software\Google\Chrome\NativeMessagingHosts' | Select-Object PSChildName
 ```
 
 Expected: a `com.chromemcp.nativehost` entry alongside the existing
-`com.anthropic.claude_code_browser_extension`. If it is absent, run `mcp-chrome-bridge register`
-and check again.
+`com.anthropic.claude_code_browser_extension` — confirmed working on this machine.
 
 - [ ] **Step 3 (owner): Confirm the installed bridge path matches the config**
 
@@ -500,7 +530,7 @@ and check again.
 Test-Path "$env:APPDATA\npm\node_modules\mcp-chrome-bridge\dist\mcp\mcp-server-stdio.js"
 ```
 
-Expected: `True`. If `False`, locate the real file and use that path in step 5 instead —
+Expected: `True`. If `False`, locate the real file and use that path in step 6 instead —
 the `dist` layout is the one value in this plan taken from the package's documentation rather
 than verified on this machine.
 
@@ -513,7 +543,20 @@ Get-ChildItem "$env:APPDATA\npm\node_modules\mcp-chrome-bridge" -Recurse -Filter
 `chrome://extensions` → Developer mode → Load unpacked → select the `mcp-chrome` extension
 folder (or install the Web Store listing). Open its popup and **turn auto-connect on**.
 
-- [ ] **Step 5: Swap the Desktop config**
+- [ ] **Step 5: Merge this branch; run the remaining steps from the main checkout**
+
+Two confirmed problems make the remaining steps unrunnable in place if skipped:
+
+- `npm run browser-probe` only exists as an npm script on this branch (added in Task 1).
+  Run against `main` before merging, it fails with `Missing script: "browser-probe"`.
+- `src/config.ts` derives `DESKTOP` as `ROOT/..`. From this worktree that resolves to
+  `...\.claude\worktrees`, not the Desktop, so the probe can never find `.mcp.json` here —
+  this is inherent to the app's path model, not a probe defect.
+
+So: merge this branch into `main` first, then run steps 6 onward from the **main checkout**
+at `C:\Users\jeon\Desktop\icarus`, not this worktree.
+
+- [ ] **Step 6: Swap the Desktop config**
 
 Edit `C:\Users\jeon\Desktop\.mcp.json`. Replace only the `browser` entry with the one from
 `docs/mcp.json.example`; leave `calendar` byte-for-byte unchanged.
@@ -527,7 +570,7 @@ Edit `C:\Users\jeon\Desktop\.mcp.json`. Replace only the `browser` entry with th
 
 Do not `git add` this file. It is Desktop data.
 
-- [ ] **Step 6: Run the probe**
+- [ ] **Step 7: Run the probe**
 
 Run: `npm run browser-probe`
 Expected: `connected: …`, a tool list including a `windows_and_tabs` tool, then the owner's
@@ -538,23 +581,23 @@ attached — go back to step 4 and check auto-connect. An early exit (the proces
 before any response, reported with its exit code) means the path from step 3 is wrong. A
 timeout means Chrome is not running.
 
-- [ ] **Step 7: Confirm boot is unaffected**
+- [ ] **Step 8: Confirm boot is unaffected**
 
 Run: `npm run typecheck && npm run selftest && npm test`
 Expected: typecheck silent, selftest prints ok, tests PASS.
 
-- [ ] **Step 8: Remove the dead CDP cache directory**
+- [ ] **Step 9: Remove the dead CDP cache directory**
 
 ```powershell
 Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\chrome-devtools-mcp" -ErrorAction SilentlyContinue
 ```
 
-- [ ] **Step 9 (owner): Restart and confirm end-to-end**
+- [ ] **Step 10 (owner): Restart and confirm end-to-end**
 
 `/restart` in the DM, then ask Icarus to read a page that requires the owner's login. A page
-that renders as a login screen means the same failure as step 6.
+that renders as a login screen means the same failure as step 7.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 Nothing from this task is committable — the config lives on the Desktop and the cache
 directory is outside the repo. Record the outcome in the DM instead. If step 3 produced a
