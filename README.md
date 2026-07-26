@@ -86,7 +86,7 @@ The server refreshes its own token; Telegram turns never open a browser.
 | Module | Config |
 |---|---|
 | calendar | `mcpServers.calendar` in Desktop `.mcp.json` (`@cocal/google-calendar-mcp` stdio) |
-| browser | `mcpServers.browser` in Desktop `.mcp.json` (e.g. chrome-devtools-mcp stdio) |
+| browser | `mcpServers.browser` in Desktop `.mcp.json` (`mcp-chrome` extension + Native Messaging host, stdio) |
 | canvas | `CANVAS_BASE_URL`, `CANVAS_API_TOKEN` in `.env` |
 | mail | `ICARUS_MAIL_DROP` — folder for daily Outlook `.pst` exports; `/mail` to tune |
 | tg-archive | `TG_API_ID`, `TG_API_HASH`, `TG_SESSION` (via `npm run tg-setup`) |

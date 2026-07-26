@@ -33,6 +33,7 @@
 | `docs/mcp.json.example` | Modify — `browser` entry becomes the `mcp-chrome` stdio bridge |
 | `tests/modules/mcpExample.test.ts` | Create — guards the shipped example against drift back to CDP |
 | `src/modules/browser/README.md` | Rewrite — `mcp-chrome` setup plus the Chrome 136 rationale |
+| root `README.md` | Modify — the module config table's `browser` row must name `mcp-chrome`, not the removed server |
 | Desktop `.mcp.json` | Owner-edited, outside the repo, never committed |
 
 **Typecheck coverage — read before relying on it.** `tsconfig.json` sets `"include": ["src/**/*.ts"]`, so `npm run typecheck` covers `src/modules/browser/probe.ts` but **not** `scripts/browser-probe.ts` or anything under `tests/`. `scripts/tg-setup.ts` already sits outside coverage the same way, so this matches the codebase rather than introducing a gap; do not widen `tsconfig.json` for this change. Task 1 typechecks the script explicitly with a one-off `tsc` invocation instead.
@@ -196,12 +197,18 @@ async function main(): Promise<void> {
 
   console.log(`spawning: ${command} ${args.join(' ')}`);
   const child = spawn(command, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  let done = false;
   const fail = (message: string): never => {
+    done = true;
     console.error(`FAIL: ${message}`);
     child.kill();
     process.exit(1);
   };
   child.on('error', (e) => fail(`could not spawn the browser server: ${e.message}`));
+  child.on('exit', (code) => {
+    if (done) return;
+    fail(`server exited with code ${code} before responding — the spawned path is likely wrong`);
+  });
 
   const reader = createLineReader();
   const pending = new Map<number, (result: unknown) => void>();
@@ -255,8 +262,9 @@ async function main(): Promise<void> {
   console.log(tabs.content?.map((c) => c.text ?? '').join('\n') ?? '(no content)');
   console.log('--- end ---');
   console.log('PASS: check the tabs above are YOUR real open tabs, not an empty throwaway profile.');
+  done = true;
   child.kill();
-  process.exit(0);
+  process.exitCode = 0;
 }
 
 void main();
@@ -526,8 +534,9 @@ Expected: `connected: …`, a tool list including a `windows_and_tabs` tool, the
 **real** open tabs.
 
 A tool list that arrives but shows an empty or unfamiliar tab set means the extension is not
-attached — go back to step 4 and check auto-connect. A spawn error means the path from step 3
-is wrong. A timeout means Chrome is not running.
+attached — go back to step 4 and check auto-connect. An early exit (the process ending
+before any response, reported with its exit code) means the path from step 3 is wrong. A
+timeout means Chrome is not running.
 
 - [ ] **Step 7: Confirm boot is unaffected**
 

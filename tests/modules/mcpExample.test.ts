@@ -7,6 +7,7 @@ import { calendarConfig } from '../../src/modules/calendar/config.js';
 import { loadMcpServers } from '../../src/modules/mcpJsonFile.js';
 
 const EXAMPLE = path.join(import.meta.dirname, '..', '..', 'docs', 'mcp.json.example');
+const ROOT_README = path.join(import.meta.dirname, '..', '..', 'README.md');
 
 describe('docs/mcp.json.example', () => {
   it('satisfies both required module config checks', () => {
@@ -25,6 +26,16 @@ describe('docs/mcp.json.example', () => {
     // Chrome >= 136 ignores --remote-debugging-port on the default user-data-dir,
     // so no CDP server can ever reach the owner's real profile. See the spec.
     const raw = readFileSync(EXAMPLE, 'utf8');
+    assert.doesNotMatch(raw, /chrome-devtools-mcp|playwright|puppeteer/i);
+  });
+});
+
+describe('README.md', () => {
+  it('does not reference any CDP-based server', () => {
+    // Same drift this guards against in docs/mcp.json.example — the root README's
+    // module table must not silently recommend a server that can never reach the
+    // owner's real profile. See the spec.
+    const raw = readFileSync(ROOT_README, 'utf8');
     assert.doesNotMatch(raw, /chrome-devtools-mcp|playwright|puppeteer/i);
   });
 });

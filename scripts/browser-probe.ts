@@ -25,12 +25,18 @@ async function main(): Promise<void> {
 
   console.log(`spawning: ${command} ${args.join(' ')}`);
   const child = spawn(command, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  let done = false;
   const fail = (message: string): never => {
+    done = true;
     console.error(`FAIL: ${message}`);
     child.kill();
     process.exit(1);
   };
   child.on('error', (e) => fail(`could not spawn the browser server: ${e.message}`));
+  child.on('exit', (code) => {
+    if (done) return;
+    fail(`server exited with code ${code} before responding — the spawned path is likely wrong`);
+  });
 
   const reader = createLineReader();
   const pending = new Map<number, (result: unknown) => void>();
@@ -84,8 +90,9 @@ async function main(): Promise<void> {
   console.log(tabs.content?.map((c) => c.text ?? '').join('\n') ?? '(no content)');
   console.log('--- end ---');
   console.log('PASS: check the tabs above are YOUR real open tabs, not an empty throwaway profile.');
+  done = true;
   child.kill();
-  process.exit(0);
+  process.exitCode = 0;
 }
 
 void main();

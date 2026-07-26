@@ -68,11 +68,13 @@ reusable here, for three independent reasons:
 ### Chosen server
 
 [`mcp-chrome`](https://github.com/hangwin/mcp-chrome) — a Chrome extension plus a local
-Node Native Messaging host. Architecturally identical to Claude in Chrome, and its tool
-surface is plainly modelled on it: `navigate`, `read_page`, `computer` (click / type / fill /
-scroll / drag), `screenshot`, `click`, `fill`, `keyboard`, `console`, `network_capture`,
-`network_request`, `file_upload`, `handle_dialog`, `handle_download`, `history`,
-`bookmark_*`, `get_windows_and_tabs`, `javascript`.
+Node Native Messaging host. Architecturally identical to Claude in Chrome: it covers
+navigation, page reading, click/type/fill/scroll/drag interaction, screenshots, console and
+network capture, file upload, dialog and download handling, history, bookmarks, and tab
+listing. Its wire tool names are `chrome_`-prefixed (e.g. `chrome_computer`,
+`chrome_read_page`, `chrome_screenshot`); nothing on this branch has verified the exact set,
+so `scripts/browser-probe.ts` confirms the real names at runtime rather than this document
+asserting a list.
 
 Because it works through the extension rather than a debug port, it uses the live profile's
 cookies, sessions, and extensions with no relaunch and nothing moved.
@@ -183,6 +185,10 @@ Chosen deliberately by the owner, recorded so they are not mistaken for oversigh
 - The `mcp-chrome` extension is third-party and gains access to every session in the profile.
 - There is no gate on browser actions. `src/agent/guard.ts` matches only
   `Write|Edit|MultiEdit|NotebookEdit|Bash` and cannot see MCP tool calls at all, so form
-  fills and submissions run unattended under `bypassPermissions`.
+  fills and submissions run unattended under `bypassPermissions`. This branch *creates* that
+  exposure rather than inheriting it: before it, the ungated browser drove a throwaway
+  profile with no logins; after it, the same ungated actions drive a fully authenticated
+  one. The sharper vector is prompt injection — hostile content in a fetched page steering
+  an authenticated turn — on an agent that already ingests untrusted Telegram input.
 - Icarus shares the browser the owner is actively using and will open and switch tabs
   underneath them.
