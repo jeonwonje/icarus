@@ -32,5 +32,11 @@
     "@types/node": "^24.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
+  },
+  "allowScripts": {
+    "bufferutil@4.1.0": true,
+    "es5-ext@0.10.64": true,
+    "esbuild@0.28.1": true,
+    "utf-8-validate@5.0.10": true
   }
 }
