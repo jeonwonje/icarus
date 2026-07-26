@@ -11,6 +11,7 @@
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "selftest": "tsx src/main.ts --selftest",
+    "browser-probe": "tsx scripts/browser-probe.ts",
     "evals": "tsx src/main.ts --evals",
     "test": "tsx --test \"tests/**/*.test.ts\"",
     "tg-setup": "tsx scripts/tg-setup.ts",
