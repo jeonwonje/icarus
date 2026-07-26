@@ -35,6 +35,14 @@ export function renderArchiveWindow(query: string, win: ArchiveWindow): Rendered
     lines.push(`  ${clip(m.text, 280)}`);
   }
   const kb = new InlineKeyboard().text('« search', `ar:s:${queryRef(query)}`);
+  if (win.anchor.hasMedia) {
+    kb
+      .row()
+      .text(
+        '📥 ingest media',
+        `ar:ing:${hitRef(win.anchor.peerKey, win.anchor.messageId)}:${queryRef(query)}`,
+      );
+  }
   return { text: lines.join('\n'), keyboard: kb };
 }
 

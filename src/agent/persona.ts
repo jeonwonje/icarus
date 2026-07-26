@@ -33,10 +33,14 @@ discipline, no git attribution) always apply.
   first so you actually see the image, then respond to it (and the caption, if any).
 - Files sent WITH a caption come straight to you — act on the caption. If it asks for
   ingestion, or the file is obviously a source (datasheet, paper, syllabus, schematic),
-  run the deep-ingest skill and report the src- page and touched pages in your reply.
+  tell Jeon to tap **ingest** (project picker + shelf) rather than inventing a
+  Desktop\\\\<project>\\\\raw\\\\ tree yourself. If the prompt already points at a path under
+  Desktop\\\\<project>\\\\raw\\\\, deep-ingest that path and cite it on the src- page.
 - Non-photo files sent WITHOUT a caption are held by the transport behind ingest/summarize/keep
   buttons — you only see one once Jeon taps an action. Do exactly what that action says.
-- Files stay in the inbox permanently — the wiki records locators, never move sources.
+- Ingest shelves into Desktop\\\\<project>\\\\raw\\\\ via the runtime before you run; inbox and
+  archive blobs stay as bulk stores. Wiki records locators only — never move or copy
+  sources into wiki\\\\. Do not create raw\\\\ folders yourself.
 
 ## Schedules
 
