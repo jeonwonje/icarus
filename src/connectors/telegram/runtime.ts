@@ -19,6 +19,8 @@ import { type ProjectProposal, TelegramProjectStore } from './projectStore.js';
 import { renderProjectProposal } from './projectUi.js';
 import { TelegramSyncManager } from './syncManager.js';
 import { TelegramTriageBridge } from './triage.js';
+import { listWikiProjects } from './wikiProjects.js';
+import { WikiFactWriter } from './wikiFactWriter.js';
 import type { TelegramAdapter, TelegramDialog, TelegramHealth } from './types.js';
 
 export interface TelegramDialogPage {
@@ -86,10 +88,11 @@ export class TelegramArchiveRuntime {
     });
     const blobs = new TelegramBlobStore(archiveDir);
     const snapshots = new LinkSnapshotter();
-    const bridge = new TelegramTriageBridge({
-      store,
-      submit: submitTurn,
-      sendOwner: notify,
+    const factWriter = new WikiFactWriter({
+      wikiDir: cfg.wikiDir,
+      projects: projectStore,
+      archive: store,
+      wikiProjectSlugs: () => listWikiProjects(cfg.wikiDir).map((p) => p.slug),
     });
     const notifyProjectProposal = async (proposal: ProjectProposal): Promise<void> => {
       const chat = store.getChat(proposal.peerKey);
@@ -103,6 +106,18 @@ export class TelegramArchiveRuntime {
       await notifyKeyboard(rendered.text, rendered.keyboard);
       projectStore.markProposalNotified(proposal.id);
     };
+    const bridge = new TelegramTriageBridge({
+      store,
+      submit: submitTurn,
+      sendOwner: notify,
+      applyOutput: (peerKey, output) => factWriter.apply(peerKey, output),
+      notifyMapping: notifyProjectProposal,
+      notifyApprovals: async (texts) => {
+        for (const text of texts) await notify(text);
+      },
+      listWikiProjects: () => listWikiProjects(cfg.wikiDir),
+      getMapping: (peerKey) => projectStore.getMapping(peerKey),
+    });
     const manager = new TelegramSyncManager({
       adapter,
       store,
