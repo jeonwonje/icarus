@@ -3,7 +3,11 @@ import './env.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CanvasAuthError, type CanvasClient } from '../src/connectors/canvasClient.js';
-import { runCanvasPoll, type CanvasPollDeps } from '../src/connectors/canvas.js';
+import {
+  clearCanvasAuthGate,
+  runCanvasPoll,
+  type CanvasPollDeps,
+} from '../src/connectors/canvas.js';
 
 function emptyClient(overrides: Partial<CanvasClient> = {}): CanvasClient {
   return {
@@ -52,50 +56,8 @@ function makeDeps(overrides: Partial<CanvasPollDeps> & { client: CanvasClient })
   };
 }
 
-test('empty and !force does not enqueue or reply', async () => {
-  let enqueued = 0;
-  let replied: string | undefined;
-  await runCanvasPoll({
-    force: false,
-    reply: (t) => {
-      replied = t;
-    },
-    deps: makeDeps({
-      client: emptyClient(),
-      enqueueTriage: () => {
-        enqueued++;
-      },
-    }),
-  });
-  assert.equal(enqueued, 0);
-  assert.equal(replied, undefined);
-});
-
-test('empty and force replies Canvas clear', async () => {
-  let enqueued = 0;
-  let replied: string | undefined;
-  await runCanvasPoll({
-    force: true,
-    reply: (t) => {
-      replied = t;
-    },
-    deps: makeDeps({
-      client: emptyClient(),
-      enqueueTriage: () => {
-        enqueued++;
-      },
-    }),
-  });
-  assert.equal(enqueued, 0);
-  assert.equal(replied, 'Canvas clear');
-});
-
-test('new dated assignment marks seen, writes delta, enqueues once', async () => {
-  const marked: string[] = [];
-  const writes: string[] = [];
-  const enqueues: { path: string; needsCalendar: number }[] = [];
-
-  const client = emptyClient({
+function assignmentClient(): CanvasClient {
+  return emptyClient({
     listCourses: async () => [
       {
         id: 10,
@@ -117,11 +79,58 @@ test('new dated assignment marks seen, writes delta, enqueues once', async () =>
       ];
     },
   });
+}
+
+test('empty and !force does not enqueue or reply', async () => {
+  let enqueued = 0;
+  let replied: string | undefined;
+  await runCanvasPoll({
+    force: false,
+    reply: (t) => {
+      replied = t;
+    },
+    deps: makeDeps({
+      client: emptyClient(),
+      getWatermark: () => '2026-07-25T08:00:00.000Z',
+      enqueueTriage: () => {
+        enqueued++;
+      },
+    }),
+  });
+  assert.equal(enqueued, 0);
+  assert.equal(replied, undefined);
+});
+
+test('empty and force replies Canvas clear', async () => {
+  let enqueued = 0;
+  let replied: string | undefined;
+  await runCanvasPoll({
+    force: true,
+    reply: (t) => {
+      replied = t;
+    },
+    deps: makeDeps({
+      client: emptyClient(),
+      getWatermark: () => '2026-07-25T08:00:00.000Z',
+      enqueueTriage: () => {
+        enqueued++;
+      },
+    }),
+  });
+  assert.equal(enqueued, 0);
+  assert.equal(replied, 'Canvas clear');
+});
+
+test('new dated assignment marks seen, writes delta, enqueues once', async () => {
+  const marked: string[] = [];
+  const writes: string[] = [];
+  const enqueues: { path: string; needsCalendar: number }[] = [];
 
   await runCanvasPoll({
     force: false,
     deps: makeDeps({
-      client,
+      client: assignmentClient(),
+      getWatermark: () => '2026-07-25T08:00:00.000Z',
       markSeen: (id) => {
         marked.push(id);
       },
@@ -142,6 +151,96 @@ test('new dated assignment marks seen, writes delta, enqueues once', async () =>
   assert.equal(enqueues.length, 1);
   assert.equal(enqueues[0]!.path, 'C:\\tmp\\canvas-delta.md');
   assert.equal(enqueues[0]!.needsCalendar, 1);
+});
+
+test('no-watermark run marks seen without enqueue', async () => {
+  const marked: string[] = [];
+  let enqueued = 0;
+  let writes = 0;
+  let watermark: string | null = null;
+  let status: string | undefined;
+
+  await runCanvasPoll({
+    force: false,
+    deps: makeDeps({
+      client: assignmentClient(),
+      getWatermark: () => watermark,
+      setWatermark: (iso) => {
+        watermark = iso;
+      },
+      getStatus: () => status,
+      setStatus: (s) => {
+        status = s;
+      },
+      markSeen: (id) => {
+        marked.push(id);
+      },
+      writeDelta: () => {
+        writes++;
+        return 'C:\\tmp\\canvas-delta.md';
+      },
+      enqueueTriage: () => {
+        enqueued++;
+      },
+    }),
+  });
+
+  assert.deepEqual(marked, ['assignment:2']);
+  assert.equal(enqueued, 0);
+  assert.equal(writes, 0);
+  assert.equal(status, 'ok');
+  assert.equal(watermark, '2026-07-26T08:00:00.000Z');
+});
+
+test('force no-watermark replies baseline seeded message', async () => {
+  let enqueued = 0;
+  let replied: string | undefined;
+
+  await runCanvasPoll({
+    force: true,
+    reply: (t) => {
+      replied = t;
+    },
+    deps: makeDeps({
+      client: assignmentClient(),
+      enqueueTriage: () => {
+        enqueued++;
+      },
+    }),
+  });
+
+  assert.equal(enqueued, 0);
+  assert.equal(replied, 'Canvas baseline seeded — next changes will digest.');
+});
+
+test('clearCanvasAuthGate clears auth status and notified flag', () => {
+  let status: string | undefined = 'auth';
+  let authNotified = true;
+  clearCanvasAuthGate({
+    getStatus: () => status,
+    clearStatus: () => {
+      status = undefined;
+    },
+    clearAuthNotified: () => {
+      authNotified = false;
+    },
+  });
+  assert.equal(status, undefined);
+  assert.equal(authNotified, false);
+
+  status = 'ok';
+  authNotified = true;
+  clearCanvasAuthGate({
+    getStatus: () => status,
+    clearStatus: () => {
+      status = undefined;
+    },
+    clearAuthNotified: () => {
+      authNotified = false;
+    },
+  });
+  assert.equal(status, 'ok');
+  assert.equal(authNotified, true);
 });
 
 test('auth error sets status and notifyAuth once', async () => {
@@ -176,4 +275,6 @@ test('auth error sets status and notifyAuth once', async () => {
   assert.deepEqual(statuses, ['auth']);
   assert.equal(notifies.length, 1);
   assert.match(notifies[0]!, /Canvas auth/i);
+  assert.match(notifies[0]!, /\/restart/);
+  assert.match(notifies[0]!, /\/canvas/);
 });

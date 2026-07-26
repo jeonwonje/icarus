@@ -65,6 +65,25 @@ export function canvasConfigured(): boolean {
   return !!(cfg.canvasBaseUrl && cfg.canvasApiToken);
 }
 
+/** Clears persisted auth early-out so scheduled polls retry after /restart. */
+export function clearCanvasAuthGate(deps?: {
+  getStatus: () => string | undefined;
+  clearStatus: () => void;
+  clearAuthNotified: () => void;
+}): void {
+  const getStatus = deps?.getStatus ?? (() => getSetting('canvas_last_poll_status'));
+  const clearStatus =
+    deps?.clearStatus ??
+    (() => {
+      setSetting('canvas_last_poll_status', '');
+    });
+  const clearAuthNotified =
+    deps?.clearAuthNotified ?? (() => setSetting('canvas_auth_notified', '0'));
+  if (getStatus() !== 'auth') return;
+  clearStatus();
+  clearAuthNotified();
+}
+
 export async function collectCandidates(
   client: CanvasClient,
   courses: CanvasCourse[],
@@ -266,9 +285,22 @@ export async function runCanvasPoll(opts: {
   try {
     const coursesRaw = await deps.client.listCourses();
     const courses = filterActiveCourses(coursesRaw as CanvasCourse[]);
-    const startDate = announcementStartDate(deps.getWatermark(), deps.nowIso());
+    const watermark = deps.getWatermark();
+    const startDate = announcementStartDate(watermark, deps.nowIso());
     const candidates = await collectCandidates(deps.client, courses, startDate);
     const fresh = classifyNew(candidates, deps.isSeen);
+
+    // First poll: quiet-seed — mark everything seen, no digest/triage.
+    if (!watermark) {
+      for (const item of fresh) deps.markSeen(item.itemId);
+      deps.setStatus('ok');
+      deps.clearAuthNotified();
+      deps.setWatermark(deps.nowIso());
+      if (opts.force) {
+        await respond(opts, 'Canvas baseline seeded — next changes will digest.');
+      }
+      return;
+    }
 
     if (fresh.length === 0) {
       deps.setStatus('ok');
@@ -293,7 +325,7 @@ export async function runCanvasPoll(opts: {
       deps.setStatus('auth');
       if (!deps.getAuthNotified()) {
         deps.notifyAuth(
-          'Canvas auth failed — check CANVAS_API_TOKEN / CANVAS_BASE_URL, then /restart.',
+          'Canvas auth failed — fix CANVAS_API_TOKEN / CANVAS_BASE_URL, then /restart (scheduled polls will retry) or /canvas to force now.',
         );
         deps.setAuthNotified();
       }
@@ -312,6 +344,7 @@ export async function runCanvasPoll(opts: {
 
 export function registerCanvasWatcher(): void {
   if (!canvasConfigured()) return;
+  clearCanvasAuthGate();
   new Cron('0 8 * * *', { protect: true, timezone: cfg.tz }, () => void runCanvasPoll({ force: false }));
   new Cron('0 18 * * *', { protect: true, timezone: cfg.tz }, () => void runCanvasPoll({ force: false }));
   log.info({ tz: cfg.tz }, 'canvas watcher registered');
