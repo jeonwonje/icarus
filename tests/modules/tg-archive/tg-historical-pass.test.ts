@@ -1,13 +1,13 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { TelegramArchiveQuery } from '../src/connectors/telegram/archiveQuery.js';
-import { TelegramHistoricalPass } from '../src/connectors/telegram/historicalPass.js';
-import type { TurnJob } from '../src/queue.js';
+import { TelegramArchiveQuery } from '../../../src/modules/tg-archive/archiveQuery.js';
+import { TelegramHistoricalPass } from '../../../src/modules/tg-archive/historicalPass.js';
+import type { TurnJob } from '../../../src/queue.js';
 import { freshArchive, message } from './tg-test-helpers.js';
 
 test('enqueue submits a job and sets state', () => {

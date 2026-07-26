@@ -1,9 +1,9 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { renderArchiveSearch, renderArchiveWindow } from '../src/connectors/telegram/archiveUi.js';
-import type { ArchiveHit, ArchiveWindow } from '../src/connectors/telegram/archiveQuery.js';
+import { renderArchiveSearch, renderArchiveWindow } from '../../../src/modules/tg-archive/archiveUi.js';
+import type { ArchiveHit, ArchiveWindow } from '../../../src/modules/tg-archive/archiveQuery.js';
 
 test('archive search render lists hits and window callbacks', () => {
   const hits: ArchiveHit[] = [

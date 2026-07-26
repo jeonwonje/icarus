@@ -1,10 +1,10 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import type { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { TelegramSyncManager } from '../src/connectors/telegram/syncManager.js';
-import type { TelegramPollSnapshot } from '../src/connectors/telegram/types.js';
+import { TelegramSyncManager } from '../../../src/modules/tg-archive/syncManager.js';
+import type { TelegramPollSnapshot } from '../../../src/modules/tg-archive/types.js';
 import { drain, makeLiveHarness, message } from './tg-test-helpers.js';
 
 const poll: TelegramPollSnapshot = {

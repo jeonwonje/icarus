@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { FakeTelegramAdapter } from '../src/connectors/telegram/fakeAdapter.js';
+import { FakeTelegramAdapter } from '../../../src/modules/tg-archive/fakeAdapter.js';
 import {
   resetTelegramRuntimeForTest,
   startTelegramRuntime,
   stopTelegramRuntime,
   telegramHealth,
-} from '../src/connectors/telegram/runtime.js';
-import { migrateDb } from '../src/db.js';
+} from '../../../src/modules/tg-archive/runtime.js';
+import { migrateDb } from '../../../src/db.js';
 
 test('runtime reports config, authorization, connection, and clean shutdown', async () => {
   const db = new DatabaseSync(':memory:');

@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, statSync, type WriteStream } from 'node:fs';
@@ -17,9 +17,9 @@ import {
   normalizeMessage,
   normalizeUpdates,
   type TelegramReadClient,
-} from '../src/connectors/telegram/adapter.js';
-import { FakeTelegramAdapter } from '../src/connectors/telegram/fakeAdapter.js';
-import type { TelegramDialog, TelegramMessage } from '../src/connectors/telegram/types.js';
+} from '../../../src/modules/tg-archive/adapter.js';
+import { FakeTelegramAdapter } from '../../../src/modules/tg-archive/fakeAdapter.js';
+import type { TelegramDialog, TelegramMessage } from '../../../src/modules/tg-archive/types.js';
 
 const OBSERVED_AT = '2026-01-01T00:00:00.000Z';
 

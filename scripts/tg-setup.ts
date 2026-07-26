@@ -3,7 +3,7 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
-import { writeTelegramEnvAtomic } from '../src/connectors/telegram/setupEnv.js';
+import { writeTelegramEnvAtomic } from '../src/modules/tg-archive/setupEnv.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const envPath = path.join(ROOT, '.env');

@@ -1,11 +1,11 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
-import { TelegramProjectStore } from '../src/connectors/telegram/projectStore.js';
-import { migrateDb } from '../src/db.js';
+import { TelegramArchiveStore } from '../../../src/modules/tg-archive/archiveStore.js';
+import { TelegramProjectStore } from '../../../src/modules/tg-archive/projectStore.js';
+import { migrateDb } from '../../../src/db.js';
 
 const fresh = () => {
   const db = new DatabaseSync(':memory:');

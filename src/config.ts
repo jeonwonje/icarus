@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { telegramConfigState } from './connectors/telegram/setupEnv.js';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
 export const DESKTOP = path.resolve(ROOT, '..');
@@ -27,17 +26,9 @@ const Env = z.object({
   CLAUDE_CODE_OAUTH_TOKEN: SELFTEST ? z.string().default('selftest') : z.string().min(10),
   ICARUS_MODEL: z.string().default('sonnet'),
   ICARUS_TZ: z.string().optional(),
-  TG_API_ID: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().int().positive().optional()),
-  TG_API_HASH: z.string().optional(),
-  TG_SESSION: z.string().optional(),
 });
 
 const env = Env.parse(process.env);
-const tgConfigState = telegramConfigState({
-  apiId: env.TG_API_ID,
-  apiHash: env.TG_API_HASH || undefined,
-  session: env.TG_SESSION || undefined,
-});
 
 export const cfg = {
   selftest: SELFTEST,
@@ -47,10 +38,6 @@ export const cfg = {
   defaultModel: env.ICARUS_MODEL,
   tz: env.ICARUS_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
 
-  tgApiId: env.TG_API_ID,
-  tgApiHash: env.TG_API_HASH || undefined,
-  tgSession: env.TG_SESSION || undefined,
-  tgConfigState,
   telegramArchiveDir: path.join(ROOT, 'archive', 'telegram'),
 
   desktopDir: DESKTOP,
@@ -87,4 +74,3 @@ export function buildSdkEnv(): Record<string, string | undefined> {
 
 export const OWNER_JID = 'dm:owner';
 export const REFLECTION_JOB = 'reflection';
-export const PROJECT_SWEEP_JOB = 'tg-project-sweep';

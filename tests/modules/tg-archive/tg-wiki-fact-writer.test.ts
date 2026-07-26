@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -7,11 +7,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
-import { TelegramProjectStore } from '../src/connectors/telegram/projectStore.js';
-import type { TriageOutput } from '../src/connectors/telegram/triageOutput.js';
-import { WikiFactWriter } from '../src/connectors/telegram/wikiFactWriter.js';
-import { migrateDb } from '../src/db.js';
+import { TelegramArchiveStore } from '../../../src/modules/tg-archive/archiveStore.js';
+import { TelegramProjectStore } from '../../../src/modules/tg-archive/projectStore.js';
+import type { TriageOutput } from '../../../src/modules/tg-archive/triageOutput.js';
+import { WikiFactWriter } from '../../../src/modules/tg-archive/wikiFactWriter.js';
+import { migrateDb } from '../../../src/db.js';
 
 const wikiIndex = (slugs: string[]) =>
   slugs.map((s) => `### [${s}](${s}/index.md)\n${s} project`).join('\n\n');

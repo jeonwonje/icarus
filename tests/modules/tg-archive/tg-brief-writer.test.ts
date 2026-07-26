@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -6,16 +6,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { TelegramArchiveQuery } from '../src/connectors/telegram/archiveQuery.js';
-import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
+import { TelegramArchiveQuery } from '../../../src/modules/tg-archive/archiveQuery.js';
+import { TelegramArchiveStore } from '../../../src/modules/tg-archive/archiveStore.js';
 import {
   applyApproval,
   chatSlug,
   upsertMemoryPointer,
-} from '../src/connectors/telegram/briefWriter.js';
-import { TelegramProjectStore } from '../src/connectors/telegram/projectStore.js';
-import { migrateDb } from '../src/db.js';
-import type { TelegramMessage } from '../src/connectors/telegram/types.js';
+} from '../../../src/modules/tg-archive/briefWriter.js';
+import { TelegramProjectStore } from '../../../src/modules/tg-archive/projectStore.js';
+import { migrateDb } from '../../../src/db.js';
+import type { TelegramMessage } from '../../../src/modules/tg-archive/types.js';
 
 const msg = (id: number, text: string): TelegramMessage => ({
   peerKey: 'group:1',

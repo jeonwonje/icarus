@@ -1,12 +1,12 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { matchChatToProjects } from '../src/connectors/telegram/proposalEngine.js';
-import { listWikiProjects } from '../src/connectors/telegram/wikiProjects.js';
+import { matchChatToProjects } from '../../../src/modules/tg-archive/proposalEngine.js';
+import { listWikiProjects } from '../../../src/modules/tg-archive/wikiProjects.js';
 
 test('listWikiProjects reads ### [slug](slug/index.md) headings only', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'wiki-'));

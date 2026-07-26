@@ -1,9 +1,9 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { migrateDb } from '../src/db.js';
+import { migrateDb } from '../../../src/db.js';
 
 test('telegram migration creates archive tables and FTS5 index', () => {
   const db = new DatabaseSync(':memory:');

@@ -1,11 +1,11 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   renderTelegramDialogs,
   renderTelegramStatusLine,
-} from '../src/connectors/telegram/ui.js';
+} from '../../../src/modules/tg-archive/ui.js';
 
 test('telegram dialog page renders search results and pagination', () => {
   const rendered = renderTelegramDialogs({

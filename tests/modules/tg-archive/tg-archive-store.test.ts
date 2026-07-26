@@ -1,11 +1,11 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
-import type { TelegramMessage } from '../src/connectors/telegram/types.js';
-import { migrateDb } from '../src/db.js';
+import { TelegramArchiveStore } from '../../../src/modules/tg-archive/archiveStore.js';
+import type { TelegramMessage } from '../../../src/modules/tg-archive/types.js';
+import { migrateDb } from '../../../src/db.js';
 
 const makeMessage = (text: string, editedAt?: string): TelegramMessage => ({
   peerKey: 'dm:1',

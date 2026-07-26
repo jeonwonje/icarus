@@ -1,12 +1,12 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { TelegramBlobStore } from '../src/connectors/telegram/blobStore.js';
-import { LinkSnapshotter } from '../src/connectors/telegram/linkSnapshot.js';
+import { TelegramBlobStore } from '../../../src/modules/tg-archive/blobStore.js';
+import { LinkSnapshotter } from '../../../src/modules/tg-archive/linkSnapshot.js';
 
 test('blob store hashes and deduplicates files', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'icarus-tg-blob-'));

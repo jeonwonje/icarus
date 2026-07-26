@@ -1,9 +1,9 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { TelegramTriageBridge } from '../src/connectors/telegram/triage.js';
-import type { TurnJob } from '../src/queue.js';
+import { TelegramTriageBridge } from '../../../src/modules/tg-archive/triage.js';
+import type { TurnJob } from '../../../src/queue.js';
 import { makeStoreWithLiveMessages } from './tg-test-helpers.js';
 
 test('simultaneous chats create separate queue jobs and same-chat arrivals coalesce locally', async () => {

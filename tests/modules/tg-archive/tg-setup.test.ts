@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import {
   telegramConfigState,
   upsertTelegramEnv,
   writeTelegramEnvAtomic,
-} from '../src/connectors/telegram/setupEnv.js';
+} from '../../../src/modules/tg-archive/setupEnv.js';
 
 const values = { apiId: 12345, apiHash: 'hash-secret', session: 'session-secret' };
 

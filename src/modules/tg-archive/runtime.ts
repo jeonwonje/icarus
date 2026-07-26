@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { InlineKeyboard } from 'grammy';
 import { ownerVoice } from '../../agent/ownerVoice.js';
 import { cfg } from '../../config.js';
+import { getTgArchiveConfig } from './config.js';
 import { db } from '../../db.js';
 import { submitTurn } from '../../queue.js';
 import { sendOwner, sendOwnerKeyboard } from '../../telegram/send.js';
@@ -72,11 +73,14 @@ export class TelegramArchiveRuntime {
       overrides?.notifyKeyboard ?? ((text: string, keyboard: InlineKeyboard) => sendOwnerKeyboard(text, keyboard));
     const adapter =
       overrides?.adapter ??
-      new GramJsTelegramAdapter({
-        apiId: cfg.tgApiId!,
-        apiHash: cfg.tgApiHash!,
-        session: cfg.tgSession!,
-      });
+      (() => {
+        const tg = getTgArchiveConfig();
+        return new GramJsTelegramAdapter({
+          apiId: tg.apiId,
+          apiHash: tg.apiHash,
+          session: tg.session,
+        });
+      })();
     const store = new TelegramArchiveStore(database);
     const archiveQuery = new TelegramArchiveQuery(store);
     const projectStore = new TelegramProjectStore(database);
@@ -131,7 +135,7 @@ export class TelegramArchiveRuntime {
       blobs,
       snapshots,
       notify,
-      session: overrides ? undefined : cfg.tgSession,
+      session: overrides ? undefined : getTgArchiveConfig().session,
       onNewLiveMessage: (peerKey, messageId) => bridge.noteMessage(peerKey, messageId),
       onImportComplete: async (peerKey) => {
         historicalPass.enqueue(peerKey);
@@ -331,9 +335,9 @@ let lastHealth: TelegramHealth = { state: 'not_configured', selectedChats: 0 };
 
 export async function startTelegramRuntime(overrides?: RuntimeOverrides): Promise<void> {
   if (current) return;
-  if (!overrides && cfg.tgConfigState !== 'configured') {
+  if (!overrides && getTgArchiveConfig().configState !== 'configured') {
     lastHealth = {
-      state: cfg.tgConfigState === 'partial' ? 'partial_config' : 'not_configured',
+      state: getTgArchiveConfig().configState === 'partial' ? 'partial_config' : 'not_configured',
       selectedChats: 0,
     };
     return;

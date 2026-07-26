@@ -4,22 +4,20 @@ import path from 'node:path';
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { cfg, MODEL_ALIASES, OWNER_JID, resolveModel, ROOT } from '../config.js';
 import {
-  telegramHealth,
   telegramRuntime,
   stopTelegramRuntime,
-} from '../connectors/telegram/runtime.js';
+} from '../modules/tg-archive/runtime.js';
 import {
   renderArchiveSearch,
   renderArchiveUnavailable,
   renderArchiveWindow,
-} from '../connectors/telegram/archiveUi.js';
+} from '../modules/tg-archive/archiveUi.js';
 import {
   renderTelegramChat,
   renderTelegramDialogs,
   renderTelegramHome,
   renderTelegramImportPrompt,
-  renderTelegramStatusLine,
-} from '../connectors/telegram/ui.js';
+} from '../modules/tg-archive/ui.js';
 import { db, getSetting, now, setSetting } from '../db.js';
 import { log } from '../log.js';
 import { clearPending, hasPending, queueStatus, submitTurn, abortRunning } from '../queue.js';
@@ -146,7 +144,6 @@ async function statusText(): Promise<string> {
       ? `last jobs:\n${lastJobs.map((j) => `▸ ${j.kind.slice(4)} · ${j.status} · ${j.started_at.slice(5, 16)}`).join('\n')}`
       : 'no job runs yet',
     ...moduleStatusLines(),
-    `▸ tg · ${renderTelegramStatusLine(telegramHealth())}`,
     `▸ token age · ${tokenAge} · db ${dbSize}`,
   ].join('\n');
 }

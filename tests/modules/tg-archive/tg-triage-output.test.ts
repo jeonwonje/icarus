@@ -1,8 +1,8 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseTriageOutput } from '../src/connectors/telegram/triageOutput.js';
+import { parseTriageOutput } from '../../../src/modules/tg-archive/triageOutput.js';
 
 test('parses fenced JSON object', () => {
   const r = parseTriageOutput('```json\n{"digest":"","facts":[],"spill":[],"approvals":[]}\n```');

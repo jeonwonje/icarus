@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { PROJECT_SWEEP_JOB } from '../src/config.js';
-import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
-import { TelegramArchiveQuery } from '../src/connectors/telegram/archiveQuery.js';
-import { TelegramHistoricalPass } from '../src/connectors/telegram/historicalPass.js';
-import { TelegramProjectStore } from '../src/connectors/telegram/projectStore.js';
-import { runTelegramProjectSweep } from '../src/connectors/telegram/projectSweep.js';
-import { migrateDb, openDb, db } from '../src/db.js';
-import { fire, seedSchedule, setEnqueue } from '../src/scheduler/scheduler.js';
+import { PROJECT_SWEEP_JOB } from '../../../src/modules/tg-archive/index.js';
+import { TelegramArchiveStore } from '../../../src/modules/tg-archive/archiveStore.js';
+import { TelegramArchiveQuery } from '../../../src/modules/tg-archive/archiveQuery.js';
+import { TelegramHistoricalPass } from '../../../src/modules/tg-archive/historicalPass.js';
+import { TelegramProjectStore } from '../../../src/modules/tg-archive/projectStore.js';
+import { runTelegramProjectSweep } from '../../../src/modules/tg-archive/projectSweep.js';
+import { migrateDb, openDb, db } from '../../../src/db.js';
+import { fire, seedSchedule, setEnqueue } from '../../../src/scheduler/scheduler.js';
 
 test('runTelegramProjectSweep enqueues historical passes and DMs unnotified pending', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'wiki-'));

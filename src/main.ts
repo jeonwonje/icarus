@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { cfg, PROJECT_SWEEP_JOB } from './config.js';
+import { cfg } from './config.js';
 import { db, getSetting, now, openDb, setSetting } from './db.js';
 
 openDb();
@@ -34,6 +34,9 @@ if (process.argv.includes('--selftest')) {
   const selftestMailDrop = path.join(cfg.stateDir, 'selftest-mail-drop');
   mkdirSync(selftestMailDrop, { recursive: true });
   process.env.ICARUS_MAIL_DROP ??= selftestMailDrop;
+  process.env.TG_API_ID ??= '1';
+  process.env.TG_API_HASH ??= 'selftest';
+  process.env.TG_SESSION ??= 'selftest';
 
   const { createModuleHost, setModuleHost, registerAll, MODULES } = await import('./modules/registry.js');
   const selftestHost = createModuleHost();
@@ -72,7 +75,8 @@ if (process.argv.includes('--selftest')) {
   console.log(`  tz: ${cfg.tz}  model: ${cfg.defaultModel}`);
   console.log(`  mail drop: ${process.env.ICARUS_MAIL_DROP ?? 'unset'}`);
   console.log(`  modules: ${MODULES.map((m) => m.id).join(', ')}`);
-  console.log(`  tg config: ${cfg.tgConfigState}`);
+  const { tgArchiveConfigState } = await import('./modules/tg-archive/config.js');
+  console.log(`  tg config: ${tgArchiveConfigState()}`);
   console.log(`  canvas: ${process.env.CANVAS_BASE_URL ?? 'unset'}`);
   console.log(`  tg archive: ${tgMessages} messages · ${tgMedia} media · ${tgPending} pending work`);
   console.log(`  tg update positions: ${tgPositions || 'none'}`);
@@ -139,36 +143,9 @@ scheduler.setEnqueue((name, prompt, { capMs, after }) => {
   });
 });
 
-// TODO(Task 7): move tg-project-sweep seed to tg-archive module
-scheduler.seedSchedule({
-  name: PROJECT_SWEEP_JOB,
-  cron: '0 9 * * 1',
-  prompt: '(code — historicalPass + notify pending)',
-  catch_up: true,
-  onFire: async ({ id }) => {
-    try {
-      const { runTelegramProjectSweep } = await import('./connectors/telegram/projectSweep.js');
-      const n = await runTelegramProjectSweep();
-      db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`ok:${n} proposals`, id);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      log.error({ name: PROJECT_SWEEP_JOB, err: msg }, 'project sweep failed');
-      db.prepare('UPDATE schedules SET last_status=? WHERE id=?').run(`err:${msg}`, id);
-    }
-  },
-});
-
 scheduler.reloadSchedules();
 trackTokenAge();
 registerCodeJobs();
-// Personal Telegram is independent of the owner bot: bad credentials must not crash-loop Icarus.
-try {
-  const { startTelegramRuntime } = await import('./connectors/telegram/runtime.js');
-  await startTelegramRuntime();
-} catch (e) {
-  log.error({ err: String(e) }, 'telegram archive runtime failed to start');
-  void sendOwner(ownerVoice.ops.archiveFailedToStart(String(e)));
-}
 
 // ---- watchdog + process safety -------------------------------------------
 
@@ -200,8 +177,9 @@ process.on('unhandledRejection', (e) => {
 });
 process.on('SIGINT', () => {
   void (async () => {
-    const { stopTelegramRuntime } = await import('./connectors/telegram/runtime.js');
-    await stopTelegramRuntime();
+    for (const fn of moduleHost.snapshot().stopHooks) {
+      await fn();
+    }
     writeFileSync(cfg.shutdownMarker, now());
     process.exit(0);
   })();

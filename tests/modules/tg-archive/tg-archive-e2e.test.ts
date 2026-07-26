@@ -1,4 +1,4 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
-import { TelegramBlobStore } from '../src/connectors/telegram/blobStore.js';
-import { FakeTelegramAdapter } from '../src/connectors/telegram/fakeAdapter.js';
-import { LinkSnapshotter } from '../src/connectors/telegram/linkSnapshot.js';
-import { TelegramSyncManager } from '../src/connectors/telegram/syncManager.js';
-import { TelegramTriageBridge } from '../src/connectors/telegram/triage.js';
-import type { TurnJob } from '../src/queue.js';
-import { migrateDb } from '../src/db.js';
+import { TelegramArchiveStore } from '../../../src/modules/tg-archive/archiveStore.js';
+import { TelegramBlobStore } from '../../../src/modules/tg-archive/blobStore.js';
+import { FakeTelegramAdapter } from '../../../src/modules/tg-archive/fakeAdapter.js';
+import { LinkSnapshotter } from '../../../src/modules/tg-archive/linkSnapshot.js';
+import { TelegramSyncManager } from '../../../src/modules/tg-archive/syncManager.js';
+import { TelegramTriageBridge } from '../../../src/modules/tg-archive/triage.js';
+import type { TurnJob } from '../../../src/queue.js';
+import { migrateDb } from '../../../src/db.js';
 import { message } from './tg-test-helpers.js';
 
 const scalar = (db: DatabaseSync, sql: string): number =>

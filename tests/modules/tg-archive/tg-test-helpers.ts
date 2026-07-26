@@ -1,21 +1,21 @@
-import './env.js';
+import '../../env.js';
 
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { TelegramArchiveStore } from '../src/connectors/telegram/archiveStore.js';
-import { TelegramBlobStore } from '../src/connectors/telegram/blobStore.js';
-import { FakeTelegramAdapter } from '../src/connectors/telegram/fakeAdapter.js';
-import { LinkSnapshotter } from '../src/connectors/telegram/linkSnapshot.js';
-import { TelegramSyncManager } from '../src/connectors/telegram/syncManager.js';
+import { TelegramArchiveStore } from '../../../src/modules/tg-archive/archiveStore.js';
+import { TelegramBlobStore } from '../../../src/modules/tg-archive/blobStore.js';
+import { FakeTelegramAdapter } from '../../../src/modules/tg-archive/fakeAdapter.js';
+import { LinkSnapshotter } from '../../../src/modules/tg-archive/linkSnapshot.js';
+import { TelegramSyncManager } from '../../../src/modules/tg-archive/syncManager.js';
 import type {
   DifferenceResult,
   TelegramLinkDescriptor,
   TelegramMediaDescriptor,
   TelegramMessage,
-} from '../src/connectors/telegram/types.js';
-import { migrateDb } from '../src/db.js';
+} from '../../../src/modules/tg-archive/types.js';
+import { migrateDb } from '../../../src/db.js';
 
 export const PLENTY_OF_SPACE = 20 * 1024 ** 3;
 

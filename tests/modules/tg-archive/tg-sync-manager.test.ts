@@ -1,13 +1,13 @@
-import './env.js';
+import '../../env.js';
 
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { TelegramBlobStore } from '../src/connectors/telegram/blobStore.js';
-import { FakeTelegramAdapter } from '../src/connectors/telegram/fakeAdapter.js';
-import { LinkSnapshotter } from '../src/connectors/telegram/linkSnapshot.js';
-import { TelegramSyncManager } from '../src/connectors/telegram/syncManager.js';
+import { TelegramBlobStore } from '../../../src/modules/tg-archive/blobStore.js';
+import { FakeTelegramAdapter } from '../../../src/modules/tg-archive/fakeAdapter.js';
+import { LinkSnapshotter } from '../../../src/modules/tg-archive/linkSnapshot.js';
+import { TelegramSyncManager } from '../../../src/modules/tg-archive/syncManager.js';
 import {
   archiveRoot,
   drain,
