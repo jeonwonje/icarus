@@ -2,6 +2,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { cfg, OWNER_JID, resolveModel, buildSdkEnv } from '../config.js';
 import { db, getSetting, now } from '../db.js';
 import { log } from '../log.js';
+import { getModuleHost, mcpServersForTurn } from '../modules/host.js';
 import { buildIcarusServer } from '../mcp/icarusTools.js';
 import type { TurnJob, TurnResult } from '../queue.js';
 import { sendOwner } from '../telegram/send.js';
@@ -70,9 +71,7 @@ export async function runTurn(job: TurnJob): Promise<TurnResult> {
           tools: { type: 'preset', preset: 'claude_code' },
           mcpServers: {
             icarus: buildIcarusServer({ jid: job.jid, kind: job.kind, getSessionId: () => sessionId }),
-            // Calendar rides along on every turn; the browser only on triage jobs.
-            ...(cfg.calendarMcp ? { calendar: { type: 'stdio' as const, ...cfg.calendarMcp } } : {}),
-            ...(job.browser && cfg.browserMcp ? { browser: { type: 'stdio' as const, ...cfg.browserMcp } } : {}),
+            ...mcpServersForTurn(getModuleHost(), job),
           },
           strictMcpConfig: true,
           env: buildSdkEnv(),

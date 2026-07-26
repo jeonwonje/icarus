@@ -26,6 +26,14 @@ for (const d of [
 // ---- one-shot modes -------------------------------------------------------
 
 if (process.argv.includes('--selftest')) {
+  process.env.ICARUS_CALENDAR_MCP ??= JSON.stringify({ command: process.execPath, args: ['-e', ''] });
+  process.env.ICARUS_BROWSER_MCP ??= JSON.stringify({ command: process.execPath, args: ['-e', ''] });
+
+  const { createModuleHost, setModuleHost, registerAll, MODULES } = await import('./modules/registry.js');
+  const selftestHost = createModuleHost();
+  await registerAll(selftestHost);
+  setModuleHost(selftestHost);
+
   const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all() as { name: string }[])
     .map((t) => t.name)
     .filter((n) => !n.startsWith('sqlite_'));
@@ -56,8 +64,9 @@ if (process.argv.includes('--selftest')) {
   console.log(`  tables: ${tables.join(', ')}`);
   console.log(`  desktop cwd: ${cfg.desktopDir}`);
   console.log(`  tz: ${cfg.tz}  model: ${cfg.defaultModel}`);
-  console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}  browser mcp: ${cfg.browserMcp ? 'configured' : 'unset'}`);
-  console.log(`  tg config: ${cfg.tgConfigState}  calendar mcp: ${cfg.calendarMcp ? 'configured' : 'unset'}`);
+  console.log(`  mail drop: ${cfg.mailDropDir ?? 'unset'}`);
+  console.log(`  modules: ${MODULES.map((m) => m.id).join(', ')}`);
+  console.log(`  tg config: ${cfg.tgConfigState}`);
   console.log(`  canvas: ${cfg.canvasBaseUrl && cfg.canvasApiToken ? cfg.canvasBaseUrl : 'unset'}`);
   console.log(`  tg archive: ${tgMessages} messages · ${tgMedia} media · ${tgPending} pending work`);
   console.log(`  tg update positions: ${tgPositions || 'none'}`);
@@ -81,10 +90,11 @@ if (process.argv.includes('--evals')) {
 
 // ---- full service ---------------------------------------------------------
 
-const { createModuleHost } = await import('./modules/host.js');
+const { createModuleHost, setModuleHost } = await import('./modules/host.js');
 const { registerAll } = await import('./modules/registry.js');
 const moduleHost = createModuleHost();
 await registerAll(moduleHost);
+setModuleHost(moduleHost);
 
 const { ownerVoice } = await import('./agent/ownerVoice.js');
 const { createBot, registerCommands } = await import('./telegram/bot.js');

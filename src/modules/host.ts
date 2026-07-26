@@ -6,6 +6,17 @@ import type {
   TurnJobLike,
 } from './types.js';
 
+let moduleHost: ModuleHost | undefined;
+
+export function setModuleHost(host: ModuleHost): void {
+  moduleHost = host;
+}
+
+export function getModuleHost(): ModuleHost {
+  if (!moduleHost) throw new Error('module host not initialized');
+  return moduleHost;
+}
+
 type HostState = {
   mcps: HostSnapshot['mcps'];
   tools: SdkMcpToolDefinition[];

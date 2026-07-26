@@ -28,8 +28,6 @@ const Env = z.object({
   ICARUS_MODEL: z.string().default('sonnet'),
   ICARUS_TZ: z.string().optional(),
   ICARUS_MAIL_DROP: z.string().optional(),
-  ICARUS_BROWSER_MCP: z.string().optional(),
-  ICARUS_CALENDAR_MCP: z.string().optional(),
   CANVAS_BASE_URL: z.string().optional(),
   CANVAS_API_TOKEN: z.string().optional(),
   TG_API_ID: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().int().positive().optional()),
@@ -44,21 +42,6 @@ const tgConfigState = telegramConfigState({
   session: env.TG_SESSION || undefined,
 });
 
-const McpJson = z.object({
-  command: z.string(),
-  args: z.array(z.string()).optional(),
-  env: z.record(z.string(), z.string()).optional(),
-});
-
-function parseMcpJson(name: string, raw: string | undefined) {
-  if (!raw) return undefined;
-  try {
-    return McpJson.parse(JSON.parse(raw));
-  } catch (e) {
-    throw new Error(`${name} is not valid JSON {command,args?,env?}: ${String(e).slice(0, 200)}`);
-  }
-}
-
 export const cfg = {
   selftest: SELFTEST,
   botToken: env.TELEGRAM_BOT_TOKEN,
@@ -67,8 +50,6 @@ export const cfg = {
   defaultModel: env.ICARUS_MODEL,
   tz: env.ICARUS_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
   mailDropDir: env.ICARUS_MAIL_DROP || undefined,
-  browserMcp: parseMcpJson('ICARUS_BROWSER_MCP', env.ICARUS_BROWSER_MCP),
-  calendarMcp: parseMcpJson('ICARUS_CALENDAR_MCP', env.ICARUS_CALENDAR_MCP),
   canvasBaseUrl: (env.CANVAS_BASE_URL || '').replace(/\/$/, '') || undefined,
   canvasApiToken: env.CANVAS_API_TOKEN || undefined,
 
