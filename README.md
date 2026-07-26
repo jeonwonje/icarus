@@ -63,25 +63,30 @@ You need Node 24+, git, and a Claude subscription.
 
 The bot answers **only** the user id in `.env`. Everyone else gets silence.
 
-### Optional: Canvas LMS digests
+### Required module env
 
-1. In Canvas: Account → Settings → New Access Token; copy the token.
-2. Set `CANVAS_BASE_URL` (e.g. `https://your-school.instructure.com`) and `CANVAS_API_TOKEN` in `.env`.
-3. `/restart`, then `/canvas` for an on-demand check. Scheduled polls run at 08:00 and 18:00 in `ICARUS_TZ`.
+All seven capabilities are **required modules** under `src/modules/`. Boot fails with a
+clear error if any module config is missing or invalid. Copy `.env.example` and fill in
+every module key:
 
-### Optional: archive personal Telegram chats
+| Module | Env |
+|---|---|
+| calendar | `ICARUS_CALENDAR_MCP` — JSON stdio MCP (Google Calendar or equivalent) |
+| browser | `ICARUS_BROWSER_MCP` — JSON stdio MCP (e.g. chrome-devtools-mcp) |
+| canvas | `CANVAS_BASE_URL`, `CANVAS_API_TOKEN` |
+| mail | `ICARUS_MAIL_DROP` — folder for daily Outlook `.pst` exports |
+| tg-archive | `TG_API_ID`, `TG_API_HASH`, `TG_SESSION` (via `npm run tg-setup`) |
+| improve | always on — persona + evals paths |
+| memory | always on — `wiki/memory` on the Desktop |
 
-1. Create API credentials at https://my.telegram.org → API development tools.
-2. Run `npm run tg-setup` and complete phone/code/2FA login locally.
-3. Send `/restart` to Icarus.
-4. Run `/tg`, search for a group or DM, review its message count, and confirm import.
-5. Use `/status` for connector health and `/tg` for detailed import progress.
-6. Search imported messages with `/archive <query>`.
-7. After import or the weekly sweep, chat→wiki mapping proposals arrive as DMs with
-   Approve/Reject buttons.
+**Canvas:** Account → Settings → New Access Token. `/restart`, then `/canvas` for an
+on-demand check. Scheduled polls run at 08:00 and 18:00 in `ICARUS_TZ`.
 
-The personal-account connection is read-only. Icarus never sends, reacts, votes, joins,
-or marks messages read as you.
+**Telegram archive:** Create API credentials at https://my.telegram.org → API development
+tools. Run `npm run tg-setup`, `/restart`, then `/tg` to search and import chats.
+Search imported messages with `/archive <query>`. After import or the weekly sweep,
+chat→wiki mapping proposals arrive as DMs with Approve/Reject buttons. The personal-account
+connection is read-only — Icarus never sends, reacts, votes, joins, or marks messages read.
 
 #### Live smoke checklist
 
@@ -127,6 +132,7 @@ crash log, and the daily canary DM tells you when the Claude token needs re-mint
 
 ```
 src\            the code (TypeScript, tsx, no build step)
+  modules\      seven required capabilities (calendar, browser, canvas, mail, improve, memory, tg-archive)
 persona\        its operating instructions — the only files it may edit itself
 evals\cases\    tiny regression tests for the persona (npm run evals)
 scripts\        supervisor loop + Task Scheduler registration

@@ -9,8 +9,14 @@ appended to the system prompt per turn — do not confuse the two.
   (append a new migration string; never edit an applied one).
 - The queue is a single global lane on purpose (one machine, one user). Don't add
   concurrency without revisiting outbox and DM interleaving.
-- `persona\` is edited at runtime by the approval flow (`src\improve\proposals.ts`), each
-  change a `persona_versions` snapshot in SQLite; `/revert` restores one. Hand-edits are
+- Capabilities live under `src\modules\` — seven required modules registered in
+  `src\modules\registry.ts` (calendar, browser, canvas, mail, improve, memory, tg-archive).
+  Missing or invalid module config fails boot. Module env: `ICARUS_CALENDAR_MCP`,
+  `ICARUS_BROWSER_MCP`, `CANVAS_BASE_URL`, `CANVAS_API_TOKEN`, `ICARUS_MAIL_DROP`,
+  `TG_API_ID`, `TG_API_HASH`, `TG_SESSION`. See `src\modules\README.md` and each module's
+  README.
+- `persona\` is edited at runtime by the approval flow (`src\modules\improve\proposals.ts`),
+  each change a `persona_versions` snapshot in SQLite; `/revert` restores one. Hand-edits are
   fine too — they're snapshotted on the next boot so history stays complete.
 - **This repo is the only git on the machine** — code and instructions only. Never commit
   `.env`, anything under `state\` / `archive\`, or anything from the Desktop data root.

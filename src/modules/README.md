@@ -36,7 +36,19 @@ The explicit ordered list lives in `registry.ts` as `MODULES`. `registerAll(host
 6. Start bot polling
 7. On shutdown: module `onStop` hooks
 
-`MODULES` is currently empty until Tasks 2–7 land the seven required modules (calendar, browser, canvas, mail, tg-archive, improve, memory).
+`MODULES` (boot order):
+
+| Module | Id | Required config |
+|---|---|---|
+| Calendar | `calendar` | `ICARUS_CALENDAR_MCP` |
+| Browser | `browser` | `ICARUS_BROWSER_MCP` |
+| Canvas | `canvas` | `CANVAS_BASE_URL`, `CANVAS_API_TOKEN` |
+| Mail | `mail` | `ICARUS_MAIL_DROP` |
+| Improve | `improve` | persona + evals paths (always on) |
+| Memory | `memory` | `wiki/memory` path (always on) |
+| TG archive | `tg-archive` | `TG_API_ID`, `TG_API_HASH`, `TG_SESSION` |
+
+Each module has its own `README.md` with env, commands, schedules, and failure modes.
 
 ## Add a module (checklist)
 
