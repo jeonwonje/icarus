@@ -5,6 +5,7 @@ import { Cron } from 'croner';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { cfg, resolveModel } from '../config.js';
 import { db, getSetting, now, setSetting } from '../db.js';
+import { ownerVoice } from '../agent/ownerVoice.js';
 import { log } from '../log.js';
 import { sendOwner } from '../telegram/send.js';
 
@@ -43,10 +44,7 @@ async function runCanary(): Promise<void> {
     log.info('token canary ok');
   } catch (e) {
     log.error({ err: String(e) }, 'token canary failed');
-    await sendOwner(
-      `⚠ Daily auth canary failed: ${String(e).slice(0, 200)}\n` +
-        `If this repeats, run \`claude setup-token\`, paste into icarus\\.env, then /restart.`,
-    );
+    await sendOwner(ownerVoice.ops.authCanaryFailed(String(e)));
   }
 
   // Age warnings at 10 / 11 / 11.5 months.
@@ -58,9 +56,7 @@ async function runCanary(): Promise<void> {
     for (let i = level; i < thresholds.length; i++) {
       if (days >= thresholds[i]) {
         setSetting('token_warn_level', String(i + 1));
-        await sendOwner(
-          `heads up: the Claude OAuth token is ${Math.floor(days)} days old — mint a fresh one soon (\`claude setup-token\`).`,
-        );
+        await sendOwner(ownerVoice.ops.tokenAging(Math.floor(days)));
       }
     }
   }

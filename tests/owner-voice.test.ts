@@ -68,3 +68,14 @@ test('ops and turn lines drop status-log prefixes', () => {
   assertHuman(ownerVoice.ops.mailStalled('2026-07-26T01:00:00.000Z'));
   assertHuman(ownerVoice.ops.archiveFailedToStart('timeout'));
 });
+
+test('banned ticket phrases are absent from ownerVoice surface', () => {
+  const samples = [
+    ownerVoice.online.firstTime(),
+    ownerVoice.online.recovered(),
+    ownerVoice.turn.failed('x'),
+    ownerVoice.ops.mailPipelineError('x'),
+  ].join('\n');
+  assert.doesNotMatch(samples, /Evidence:/);
+  assert.doesNotMatch(samples, /Self-edit proposal/);
+});

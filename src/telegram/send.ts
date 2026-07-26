@@ -1,5 +1,6 @@
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import path from 'node:path';
+import { ownerVoice } from '../agent/ownerVoice.js';
 import { cfg } from '../config.js';
 import { log } from '../log.js';
 
@@ -44,7 +45,7 @@ export async function sendOwnerDocument(filePath: string, caption?: string): Pro
     });
   } catch (e) {
     log.error({ err: String(e), filePath }, 'sendOwnerDocument failed');
-    await sendOwner(`couldn't send ${path.basename(filePath)}: ${String(e).slice(0, 200)}`);
+    await sendOwner(ownerVoice.ops.sendDocumentFailed(path.basename(filePath), String(e)));
   }
 }
 
