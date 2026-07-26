@@ -4,6 +4,10 @@ Date: 2026-07-26
 Status: approved for implementation planning
 Amends:
 - `docs/superpowers/specs/2026-07-26-telegram-project-synthesis-design.md` (phase 3)
+Amended by:
+- `docs/superpowers/specs/2026-07-26-project-raw-shelf-design.md` — runtime may write
+  only `Desktop/<project>/raw/` on intentional ingest; triage LLM still does not write
+  Desktop project trees
 Depends on:
 - `docs/superpowers/specs/2026-07-25-telegram-archive-foundation-design.md` (phase 1)
 - `docs/superpowers/specs/2026-07-26-telegram-archive-retrieval-design.md` (phase 2)
@@ -46,14 +50,15 @@ Noise is common; silence must remain the default.
 - Sticky mapping with **cross-project spill** when evidence is strong; spill does not
   create a brief for an unmapped chat.
 - Keep locator-style cites (peer + message id / deep link); no transcript dumps into wiki.
-- Never write outside `wiki/` and the Icarus memory directory; never write Desktop project
-  folders.
+- Never write outside `wiki/` and the Icarus memory directory. The triage **LLM** never
+  writes Desktop project folders; the separate raw-shelf **runtime** may write only
+  `Desktop/<project>/raw/` on intentional ingest (see project-raw-shelf design).
 
 ## Non-goals
 
 - Embedding / clustering stack for mapping.
 - Auto-creating wiki projects without Approve.
-- Writing into Desktop project folders.
+- Triage LLM writing into Desktop project folders (raw-shelf runtime is out of scope here).
 - Re-running full-history digests on every process restart.
 - Changing phase 1 sync semantics (archive remains read-only on the personal account).
 - Replacing Approve/Reject for first sticky mapping and for structural ops.

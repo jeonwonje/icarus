@@ -93,6 +93,21 @@ export function fileActionKeyboard(savedPath: string): InlineKeyboard {
     .text('💤 just keep', `file:${ref}:keep`);
 }
 
+/** DM ingest always picks a Desktop/wiki project before shelving into raw/. */
+export function fileProjectPickerKeyboard(savedPath: string, projects: string[]): InlineKeyboard {
+  const pathRef = refFor(savedPath);
+  const kb = new InlineKeyboard();
+  if (projects.length === 0) {
+    kb.text('no shelvable projects', `file:${pathRef}:keep`);
+    return kb;
+  }
+  for (const p of projects) {
+    kb.text(`📁 ${p}`, `fileproj:${pathRef}:${refFor(p)}`).row();
+  }
+  kb.text('cancel', `file:${pathRef}:keep`);
+  return kb;
+}
+
 // ---- wiki browser ---------------------------------------------------------
 
 export function renderWikiHome(): Rendered {

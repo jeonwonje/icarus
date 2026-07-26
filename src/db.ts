@@ -254,6 +254,17 @@ const MIGRATIONS: string[] = [
     ON tg_project_proposals(state, notified_at)
     WHERE state='pending' AND notified_at IS NULL;
   `,
+  `
+  CREATE TABLE raw_shelf (
+    project TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK(length(sha256)=64),
+    rel_path TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project, sha256)
+  );
+  CREATE INDEX idx_raw_shelf_project ON raw_shelf(project);
+  `,
 ];
 
 export let db: DatabaseSync;

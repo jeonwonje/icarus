@@ -163,6 +163,14 @@ export class TelegramArchiveRuntime {
     return this.archiveQuery;
   }
 
+  getMapping(peerKey: string) {
+    return this.projectStore.getMapping(peerKey);
+  }
+
+  mediaForMessage(peerKey: string, messageId: number) {
+    return this.store.loadTriageAttachments(peerKey, [messageId]).media;
+  }
+
   async start(): Promise<void> {
     await this.manager.start();
     this.bridge.start();

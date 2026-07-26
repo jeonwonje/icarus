@@ -70,4 +70,38 @@ test('archive window render marks the anchor', () => {
   assert.match(rendered.text, /▸/);
   assert.match(rendered.text, /anchor/);
   assert.match(JSON.stringify(rendered.keyboard.inline_keyboard), /ar:s:/);
+  assert.doesNotMatch(JSON.stringify(rendered.keyboard.inline_keyboard), /ar:ing:/);
+});
+
+test('archive window shows ingest when anchor has media', () => {
+  const win: ArchiveWindow = {
+    anchor: {
+      peerKey: 'supergroup:99',
+      messageId: 10,
+      chatTitle: 'Morian',
+      senderName: 'Alice',
+      sentAt: '2026-01-01T00:00:00.000Z',
+      deleted: false,
+      text: 'anchor',
+      deepLink: 'https://t.me/morianchat/10',
+      hasMedia: true,
+      hasLinks: false,
+    },
+    messages: [
+      {
+        peerKey: 'supergroup:99',
+        messageId: 10,
+        chatTitle: 'Morian',
+        senderName: 'Alice',
+        sentAt: '2026-01-01T00:00:00.000Z',
+        deleted: false,
+        text: 'anchor',
+        deepLink: 'https://t.me/morianchat/10',
+        hasMedia: true,
+        hasLinks: false,
+      },
+    ],
+  };
+  const rendered = renderArchiveWindow('duck', win);
+  assert.match(JSON.stringify(rendered.keyboard.inline_keyboard), /ar:ing:/);
 });

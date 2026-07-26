@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { existsSync, statSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { cfg, MODEL_ALIASES, OWNER_JID, resolveModel, ROOT } from '../config.js';
@@ -28,10 +29,15 @@ import { clearPending, hasPending, queueStatus, submitTurn, abortRunning } from 
 import { clearSession, getSession } from '../agent/sessions.js';
 import { decideProposal, latestPending, listPersonaCommits, revertCommit } from '../improve/proposals.js';
 import { listSchedulesWithNextRun, removeSchedule, runNow, updateSchedule } from '../scheduler/scheduler.js';
+import { listShelvableProjects } from '../rawProjects.js';
+import { blobPathForHash, fileToRaw } from '../rawShelf.js';
+import { RawShelfStore } from '../rawShelfStore.js';
 import { saveIncomingFile } from './files.js';
 import { sendOwner, sendOwnerDocument, sendOwnerKeyboard, sendOwnerEphemeral, deleteOwnerMessage, startTyping } from './send.js';
 import {
   fileActionKeyboard,
+  fileProjectPickerKeyboard,
+  refFor,
   refGet,
   renderScheduleDeleteConfirm,
   renderScheduleList,
@@ -169,6 +175,56 @@ async function editTo(ctx: Context, r: Rendered): Promise<void> {
 
 const expired = (ctx: Context) => ctx.answerCallbackQuery({ text: 'that button expired — run the command again' });
 
+async function shelfAndIngestArchiveMedia(
+  ctx: Context,
+  runtime: NonNullable<ReturnType<typeof telegramRuntime>>,
+  hit: { peerKey: string; messageId: number },
+  project: string,
+): Promise<void> {
+  const media = runtime
+    .mediaForMessage(hit.peerKey, hit.messageId)
+    .find((m) => m.status === 'done' && m.blobHash);
+  if (!media?.blobHash) {
+    await editTo(ctx, {
+      text: 'no downloaded media on that message',
+      keyboard: new InlineKeyboard(),
+    });
+    return;
+  }
+  const sourcePath = blobPathForHash(media.blobHash);
+  if (!existsSync(sourcePath)) {
+    await editTo(ctx, {
+      text: `blob missing on disk: ${media.blobHash.slice(0, 12)}…`,
+      keyboard: new InlineKeyboard(),
+    });
+    return;
+  }
+  try {
+    const shelved = await fileToRaw({
+      project,
+      sourcePath,
+      displayName: media.filename ?? media.mediaKey,
+      store: new RawShelfStore(db),
+    });
+    const note = shelved.reused ? ' (already on shelf)' : '';
+    await editTo(ctx, {
+      text: `📥 shelved${note} → ${shelved.path}\ningesting…`,
+      keyboard: new InlineKeyboard(),
+    });
+    submitOwnerText(
+      `Ingest this file into the wiki using the deep-ingest skill: ${shelved.path}\n` +
+        `It is already filed under Desktop\\${project}\\raw\\.\n` +
+        `Telegram provenance: ${hit.peerKey}#${hit.messageId}\n` +
+        `blob:sha256:${media.blobHash}`,
+    );
+  } catch (e) {
+    await editTo(ctx, {
+      text: `couldn't shelf: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`,
+      keyboard: new InlineKeyboard(),
+    });
+  }
+}
+
 async function handleCallback(ctx: Context, data: string): Promise<void> {
   if (data === 'turn:stop') {
     const stopped = abortRunning();
@@ -259,14 +315,47 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
     return;
   }
   // -- incoming-file actions ---------------------------------------------
+  if (data.startsWith('fileproj:')) {
+    const [, pathRefStr, projectRefStr] = data.split(':');
+    const savedPath = refGet(Number(pathRefStr));
+    const project = refGet(Number(projectRefStr));
+    if (!savedPath || !project) return void (await expired(ctx));
+    await ctx.answerCallbackQuery();
+    try {
+      const shelved = await fileToRaw({
+        project,
+        sourcePath: savedPath,
+        displayName: path.basename(savedPath),
+        store: new RawShelfStore(db),
+      });
+      const note = shelved.reused ? ' (already on shelf)' : '';
+      await editTo(ctx, {
+        text: `📥 shelved${note} → ${shelved.path}\ningesting…`,
+        keyboard: new InlineKeyboard(),
+      });
+      submitOwnerText(
+        `Ingest this file into the wiki using the deep-ingest skill: ${shelved.path}\n` +
+          `It is already filed under Desktop\\${project}\\raw\\. Cite that locator on the src- page.`,
+      );
+    } catch (e) {
+      await editTo(ctx, {
+        text: `couldn't shelf: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`,
+        keyboard: new InlineKeyboard(),
+      });
+    }
+    return;
+  }
   if (data.startsWith('file:')) {
     const [, refStr, action] = data.split(':');
     const savedPath = refGet(Number(refStr));
     if (!savedPath) return void (await expired(ctx));
     await ctx.answerCallbackQuery();
     if (action === 'ingest') {
-      await editTo(ctx, { text: `📥 ingesting ${savedPath} — I'll report back.`, keyboard: new InlineKeyboard() });
-      submitOwnerText(`Ingest this file into the wiki using the deep-ingest skill: ${savedPath}`);
+      const projects = listShelvableProjects();
+      await editTo(ctx, {
+        text: `📥 ingest ${path.basename(savedPath)} — pick a project:`,
+        keyboard: fileProjectPickerKeyboard(savedPath, projects),
+      });
     } else if (action === 'sum') {
       await editTo(ctx, { text: `📝 summarizing ${savedPath}…`, keyboard: new InlineKeyboard() });
       submitOwnerText(`Read ${savedPath} and give me a short summary. Don't ingest it into the wiki yet.`);
@@ -349,6 +438,47 @@ async function handleCallback(ctx: Context, data: string): Promise<void> {
           includeDeleted: false,
         });
         await editTo(ctx, renderArchiveWindow(query, win));
+        return;
+      }
+      if (data.startsWith('ar:ingp:')) {
+        const parts = data.split(':');
+        const hitRaw = refGet(Number(parts[2]));
+        const query = refGet(Number(parts[3]));
+        const project = refGet(Number(parts[4]));
+        if (!hitRaw || query === undefined || !project) return void (await expired(ctx));
+        const hit = JSON.parse(hitRaw) as { peerKey: string; messageId: number };
+        await ctx.answerCallbackQuery();
+        await shelfAndIngestArchiveMedia(ctx, runtime, hit, project);
+        return;
+      }
+      if (data.startsWith('ar:ing:')) {
+        const parts = data.split(':');
+        const hitRefNum = Number(parts[2]);
+        const qRefNum = Number(parts[3]);
+        const hitRaw = refGet(hitRefNum);
+        const query = refGet(qRefNum);
+        if (!hitRaw || query === undefined) return void (await expired(ctx));
+        const hit = JSON.parse(hitRaw) as { peerKey: string; messageId: number };
+        await ctx.answerCallbackQuery();
+        const sticky = runtime.getMapping(hit.peerKey)?.wikiProject;
+        if (sticky) {
+          await shelfAndIngestArchiveMedia(ctx, runtime, hit, sticky);
+          return;
+        }
+        const projects = listShelvableProjects();
+        const kb = new InlineKeyboard();
+        if (projects.length === 0) {
+          kb.text('no shelvable projects', `ar:w:${hitRefNum}:${qRefNum}`);
+        } else {
+          for (const p of projects) {
+            kb.text(`📁 ${p}`, `ar:ingp:${hitRefNum}:${qRefNum}:${refFor(p)}`).row();
+          }
+          kb.text('cancel', `ar:w:${hitRefNum}:${qRefNum}`);
+        }
+        await editTo(ctx, {
+          text: `📥 ingest archive media — pick a project:`,
+          keyboard: kb,
+        });
         return;
       }
     } catch (e) {
